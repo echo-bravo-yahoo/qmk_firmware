@@ -1,18 +1,3 @@
-/* Copyright 2018 MechMerlin
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
 #include QMK_KEYBOARD_H
 
 // Defines the keycodes used by our macros in process_record_user
@@ -22,12 +7,45 @@ enum custom_keycodes {
 };
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
+  // base layer
  [0] = LAYOUT_ortho_5x15( \
-    KC_ESC,   KC_1,    KC_2,    KC_3,    KC_4,    KC_5,    KC_NO,   KC_NO,   KC_NO,   KC_6,     KC_7,    KC_8,    KC_9,    KC_0,    KC_BSPC,  \
-    KC_GRAVE, KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,    KC_NO,   KC_NO,   KC_NO,   KC_Y,     KC_U,    KC_I,    KC_O,    KC_P,    KC_MINUS, \
-    KC_TAB,   KC_A,    KC_S,    KC_D,    KC_F,    KC_G,    KC_NO,   KC_NO,   KC_NO,   KC_H,     KC_J,    KC_K,    KC_L,    KC_SCLN, KC_QUOT,  \
-    KC_LSFT,  KC_Z,    KC_X,    KC_C,    KC_V,    KC_B,    KC_NO,   KC_NO,   RESET,   KC_N,     KC_M,    KC_LBRC, KC_RBRC, KC_UP,   KC_EQUAL, \
-    KC_LCTL,  KC_LGUI, KC_LALT, KC_ENT,  KC_SPC,  SH_MON,  KC_NO,   KC_LEAD, KC_NO,   KC_COMM,  KC_DOT,  KC_SLSH, KC_LEFT, KC_DOWN, KC_RIGHT  \
+    KC_ESC,   KC_1,    KC_2,    KC_3,    KC_4,    KC_5,    KC_NO,   KC_NO,   KC_NO,   KC_6,     KC_7,    KC_8,    KC_9,    KC_0,      KC_BSPC,  \
+    KC_GRAVE, KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,    KC_NO,   KC_NO,   KC_NO,   KC_Y,     KC_U,    KC_I,    KC_O,    KC_P,      KC_MINUS, \
+    KC_TAB,   KC_A,    KC_S,    KC_D,    KC_F,    KC_G,    KC_NO,   KC_NO,   KC_NO,   KC_H,     KC_J,    KC_K,    KC_L,    KC_SCLN,   KC_QUOT,  \
+    KC_LSFT,  KC_Z,    KC_X,    KC_C,    KC_V,    KC_B,    KC_NO,   KC_NO,   RESET,   KC_N,     KC_M,    KC_LBRC, KC_RBRC, KC_BSLASH, KC_EQUAL, \
+    KC_LCTL,  KC_LGUI, KC_LALT, KC_ENT,  KC_SPC,  SH_MON,  KC_NO,   KC_LEAD, KC_NO,   KC_COMM,  KC_DOT,  KC_SLSH, KC_NO,   KC_NO,     KC_NO     \
+  ),
+ // window management layer activated with LEADER+W
+ [1] = LAYOUT_ortho_5x15( \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, G(KC_TAB),  KC_NO,       G(KC_TAB),  KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, G(C(KC_H)), KC_NO,       G(C(KC_L)), KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_NO,      KC_NO,       G(KC_W),    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_NO,      G(KC_SPACE), RESET,      KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, MO(4),      KC_LEAD,     MO(3),      KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS  \
+  ),
+ // shooter layer activated with LEADER+A
+ [2] = LAYOUT_ortho_5x15( \
+    KC_NO,   KC_3,    KC_3,    KC_3,    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TAB,  KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_M,    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_ENT,  KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_SPC,  KC_SPC,  KC_SPC,  KC_TRNS, KC_LEAD, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS  \
+  ),
+ // lowered window management layer activated with LEADER+W Vthis volumn
+ [3] = LAYOUT_ortho_5x15( \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_LEAD, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS  \
+  ),
+ // raised management layer activated with LEADER+W
+ [4] = LAYOUT_ortho_5x15( \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, SGUI(KC_GRAVE), KC_TRNS, G(KC_GRAVE),   KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, S(C(A(KC_H))),  KC_TRNS, S(C(A(KC_L))), KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,        KC_TRNS, KC_TRNS,       KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,        KC_TRNS, KC_TRNS,       KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,        KC_LEAD, KC_NO,         KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS  \
   ),
 };
 
@@ -73,12 +91,22 @@ void matrix_scan_user(void) {
     leader_end();
 
     SEQ_ONE_KEY(KC_W) {
-      // Anything you can do in a macro.
-      SEND_STRING("QMK is awesome.");
+      layer_clear();
+      layer_on(1);
+    }
+
+    SEQ_ONE_KEY(KC_A) {
+      layer_clear();
+      layer_on(2);
+    }
+
+    SEQ_ONE_KEY(KC_ESC) {
+      layer_clear();
+      layer_on(0);
     }
   }
-}
+};
 
 void led_set_user(uint8_t usb_led) {
 
-}
+};

@@ -16,5 +16,6 @@
 
 #pragma once
 #define LEADER_TIMEOUT 300
+#define TAPPING_TERM 175
 
 // place overrides here

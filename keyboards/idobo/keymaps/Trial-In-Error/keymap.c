@@ -6,21 +6,26 @@ enum custom_keycodes {
   QMKURL
 };
 
+// Tap dance declarations
+enum {
+  TD_RESET = 0
+};
+
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   // base layer
  [0] = LAYOUT_ortho_5x15( \
-    KC_ESC,   KC_1,    KC_2,    KC_3,    KC_4,    KC_5,    KC_NO,   KC_NO,   KC_NO,   KC_6,     KC_7,    KC_8,    KC_9,    KC_0,      KC_BSPC,  \
-    KC_GRAVE, KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,    KC_NO,   KC_NO,   KC_NO,   KC_Y,     KC_U,    KC_I,    KC_O,    KC_P,      KC_MINUS, \
-    KC_TAB,   KC_A,    KC_S,    KC_D,    KC_F,    KC_G,    KC_NO,   KC_NO,   KC_NO,   KC_H,     KC_J,    KC_K,    KC_L,    KC_SCLN,   KC_QUOT,  \
-    KC_LSFT,  KC_Z,    KC_X,    KC_C,    KC_V,    KC_B,    KC_NO,   KC_NO,   RESET,   KC_N,     KC_M,    KC_LBRC, KC_RBRC, KC_BSLASH, KC_EQUAL, \
-    KC_LCTL,  KC_LGUI, KC_LALT, KC_ENT,  KC_SPC,  SH_MON,  KC_NO,   KC_LEAD, KC_NO,   KC_COMM,  KC_DOT,  KC_SLSH, KC_NO,   KC_NO,     KC_NO     \
+    KC_ESC,   KC_1,    KC_2,    KC_3,    KC_4,    KC_5,    KC_NO,   KC_NO,   KC_NO,        KC_6,     KC_7,    KC_8,    KC_9,    KC_0,      KC_BSPC,  \
+    KC_GRAVE, KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,    KC_NO,   KC_NO,   KC_NO,        KC_Y,     KC_U,    KC_I,    KC_O,    KC_P,      KC_MINUS, \
+    KC_TAB,   KC_A,    KC_S,    KC_D,    KC_F,    KC_G,    KC_NO,   KC_NO,   KC_NO,        KC_H,     KC_J,    KC_K,    KC_L,    KC_SCLN,   KC_QUOT,  \
+    KC_LSFT,  KC_Z,    KC_X,    KC_C,    KC_V,    KC_B,    KC_ENT,  KC_NO,   TD(TD_RESET), KC_N,     KC_M,    KC_LBRC, KC_RBRC, KC_BSLASH, KC_EQUAL, \
+    KC_LCTL,  KC_LGUI, KC_LALT, KC_ENT,  KC_SPC,  SH_MON,  MO(3),   KC_LEAD, MO(4),        KC_COMM,  KC_DOT,  KC_SLSH, KC_NO,   KC_NO,     KC_NO     \
   ),
  // window management layer activated with LEADER+W
  [1] = LAYOUT_ortho_5x15( \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, G(KC_TAB),  KC_NO,       G(KC_TAB),  KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, G(C(KC_H)), KC_NO,       G(C(KC_L)), KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_NO,      KC_NO,       G(KC_W),    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
-    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_NO,      G(KC_SPACE), RESET,      KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_NO,      G(KC_SPACE), KC_TRNS,    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, MO(4),      KC_LEAD,     MO(3),      KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS  \
   ),
  // shooter layer activated with LEADER+A
@@ -31,21 +36,21 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_ENT,  KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_SPC,  KC_SPC,  KC_SPC,  KC_TRNS, KC_LEAD, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS  \
   ),
- // lowered window management layer activated with LEADER+W Vthis volumn
+ // raised base layer
  [3] = LAYOUT_ortho_5x15( \
+    KC_F12,  KC_F1,   KC_F2,   KC_F3,   KC_F4,   KC_F5,   KC_TRNS, KC_TRNS, KC_TRNS, KC_F6,   KC_F7,   KC_F8,   KC_F9,    KC_F10,  KC_F11,
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,  KC_TRNS, KC_TRNS,
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_LEFT, KC_DOWN, KC_UP,   KC_RIGHT, KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_MUTE, KC_VOLD, KC_VOLU,  KC_TRNS, KC_TRNS, \
+    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_LEAD, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,  KC_TRNS, KC_TRNS  \
+  ),
+ // lowered base layer
+ [4] = LAYOUT_ortho_5x15( \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
     KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_LEAD, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS  \
-  ),
- // raised management layer activated with LEADER+W
- [4] = LAYOUT_ortho_5x15( \
-    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, SGUI(KC_GRAVE), KC_TRNS, G(KC_GRAVE),   KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,
-    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, S(C(A(KC_H))),  KC_TRNS, S(C(A(KC_L))), KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,
-    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,        KC_TRNS, KC_TRNS,       KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
-    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,        KC_TRNS, KC_TRNS,       KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, \
-    KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS,        KC_LEAD, KC_NO,         KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS  \
   ),
 };
 
@@ -109,4 +114,17 @@ void matrix_scan_user(void) {
 
 void led_set_user(uint8_t usb_led) {
 
+};
+
+void tap_dance_reset(qk_tap_dance_state_t *state, void *user_data) {
+  if (state->count >= 2) {
+    reset_keyboard();
+    reset_tap_dance(state);
+  }
+};
+
+// Tap Dance definitions
+qk_tap_dance_action_t tap_dance_actions[] = {
+  // Tap once for nothing, twice for RESET
+  [TD_RESET] = ACTION_TAP_DANCE_FN(tap_dance_reset)
 };

@@ -16,6 +16,8 @@
 
 #pragma once
 
+#define USER_PRINT
+
 #ifdef RGBLIGHT_ENABLE
 #    define RGBLIGHT_ANIMATIONS
 #    define RGBLIGHT_HUE_STEP  8
@@ -26,3 +28,15 @@
 
 // Lets you roll mod-tap keys
 #define IGNORE_MOD_TAP_INTERRUPT
+
+// Debug for userprint messages only
+#define USER_PRINT
+
+// transfer / sync
+#define SPLIT_TRANSACTION_IDS_USER USER_SYNC_A, USER_SYNC_B, USER_SYNC_C
+// Primary to secondary:
+#define RPC_M2S_BUFFER_SIZE 48
+// Secondary to primary:
+#define RPC_S2M_BUFFER_SIZE 48
+
+#include <stdbool.h>

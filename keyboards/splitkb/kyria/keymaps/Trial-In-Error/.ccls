@@ -1,0 +1,26 @@
+clang
+%c -std=gnu99
+%cpp -std=c++11
+%h -x
+%h c++-header
+%h %hpp --include=keyboards/splitkb/kyria/keymaps/Trial-In-Error/config.h
+%h %hpp --include=keyboards/splitkb/kyria/config.h
+%h %hpp --include=keyboards/splitkb/kyria/rev2/config.h
+%h %hpp --include=.build/obj_splitkb_kyria_rev2/src/info_config.h
+%h %hpp --include=.build/obj_splitkb_kyria_rev2/src/layouts.h
+%h %hpp --include=quantum/quantum.h
+%h %hpp --include=quantum/split_common/post_config.h
+%h %hpp --include=quantum/split_common/transactions.h
+%h %hpp --include=quantum/split_common/split_util.h
+-DQMK_KEYBOARD_H=<quantum.h>
+-I/usr/include
+-I/usr/local/include
+-I/home/swift/workspace/qmk_firmware
+-I/home/swift/workspace/qmk_firmware/**
+-I/home/swift/workspace/qmk_firmware/quantum/**
+-I/home/swift/workspace/qmk_firmware/quantum/audio/**
+-I/home/swift/workspace/qmk_firmware/quantum/process_keycode/**
+-I/home/swift/workspace/tmk_core/common/**
+-I/home/swift/workspace/drivers/avr/**
+-I/home/swift/workspace/lib/chibios/**
+-I/home/swift/workspace/lib/lufa/**

@@ -19,6 +19,9 @@
 #include <stdio.h>
 #include "config.h"
 #include "transactions.h"
+#include "raw_hid.h"
+#include <keyboard.h>
+#include "string.h"
 
 enum layers {
     _QWERTY = 0,
@@ -174,11 +177,136 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 //     ),
 };
 
-/* The default OLED and rotary encoder code can be found at the bottom of qmk_firmware/keyboards/splitkb/kyria/rev1/rev1.c
- * These default settings can be overriden by your own settings in your keymap.c
- * For your convenience, here's a copy of those settings so that you can uncomment them if you wish to apply your own modifications.
- * DO NOT edit the rev1.c file; instead override the weakly defined default functions by your own.
- */
+// HERE BEGINS DATA SYNC STUFF
+typedef struct _primary_to_secondary_t {
+    char* p2s_data;
+} primary_to_secondary_t;
+
+typedef struct _secondary_to_primary_t {
+    int s2p_data;
+} secondary_to_primary_t;
+
+bool volatile hid_screen_change = false;
+
+void user_sync_a_secondary_handler(uint8_t in_buflen, const void* in_data, uint8_t out_buflen, void* out_data) {
+    // const primary_to_secondary_t *m2s = (const primary_to_secondary_t*)in_data;
+    // secondary_to_primary_t *s2m = (secondary_to_primary_t*)out_data;
+    const primary_to_secondary_t *p2s = (const primary_to_secondary_t*)in_data;
+    oled_clear();
+    oled_write(p2s->p2s_data, SERIAL_SCREEN_BUFFER_LENGTH);
+}
+
+void keyboard_post_init_user(void) {
+    transaction_register_rpc(USER_SYNC_A, user_sync_a_secondary_handler);
+}
+
+uint8_t volatile serial_secondary_screen_buffer[21 * 4 + 1] = {0};
+primary_to_secondary_t m2s = {0};
+secondary_to_primary_t s2m = {0};
+
+void housekeeping_task_user(void) {
+  if (is_keyboard_master()) {
+    // Interact with secondary every 500ms
+    static uint32_t last_sync = 0;
+    if (timer_elapsed32(last_sync) > 500) {
+      /*
+         if(transaction_rpc_exec(USER_SYNC_A, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
+         last_sync = timer_read32();
+         m2s.m2s_data = s2m.s2m_data;
+         uprintf("Secondary value: %d\n", m2s.m2s_data); // this will have incremented
+         } else {
+         uprint("Secondary sync failed!\n");
+         }
+         */
+      if (hid_screen_change) {
+        uprintln("SENDING DATA");
+        transaction_rpc_exec(USER_SYNC_A, sizeof(serial_secondary_screen_buffer), (char*)&serial_secondary_screen_buffer, 0, &s2m);
+        hid_screen_change = false;
+      }
+    }
+  }
+}
+
+// HID input
+bool is_hid_connected = false; // Flag indicating if we have a PC connection yet
+uint8_t screen_max_count = 0;  // Number of info screens we can scroll through (set by connecting node script)
+uint8_t screen_show_index = 0; // Current index of the info screen we are displaying
+uint8_t screen_data_buffer[SERIAL_SCREEN_BUFFER_LENGTH - 1] =  {0}; // Buffer used to store the screen data sent by connected node script
+int screen_data_index = 0; // Current index into the screen_data_buffer that we should write to
+
+void raw_hid_send_screen_index(void) {
+  // Send the current info screen index to the connected node script so that it can pass back the new data
+  uint8_t send_data[32] = {0};
+  send_data[0] = screen_show_index + 1; // Add one so that we can distinguish it from a null byte
+  raw_hid_send(send_data, sizeof(send_data));
+}
+
+void raw_hid_receive(uint8_t *data, uint8_t length) {
+  // PC connected, so set the flag to show a message on the master display
+  is_hid_connected = true;
+  uprintln("raw_hid_receive");
+
+  // Initial connections use '1' in the first byte to indicate this
+  if (length > 1 && data[0] == 1) {
+    // New connection so restart screen_data_buffer
+    screen_data_index = 0;
+
+    // The second byte is the number of info screens the connected node script allows us to scroll through
+    screen_max_count = data[1];
+    if (screen_show_index >= screen_max_count) {
+      screen_show_index = 0;
+    }
+
+    // Tell the connection which info screen we want to look at initially
+    raw_hid_send_screen_index();
+    return;
+  }
+
+  // Otherwise the data we receive is one line of the screen to show on the display
+  if (length >= 21) {
+    // Copy the data into our buffer and increment the number of lines we have got so far
+    memcpy((char*)&screen_data_buffer[screen_data_index * 21], data, 21);
+    screen_data_index++;
+
+    // Once we reach 4 lines, we have a full screen
+    if (screen_data_index == 4) {
+      // Reset the buffer back to receive the next full screen data
+      screen_data_index = 0;
+
+      // Now get ready to transfer the whole 4 lines to the secondary side of the keyboard.
+      // First clear the transfer buffer with spaces just in case.
+      memset((char*)&serial_secondary_screen_buffer[0], ' ', sizeof(serial_secondary_screen_buffer));
+
+      // Copy in the 4 lines of screen data, but start at index 1, we use index 0 to indicate a connection in the secondary code
+      memcpy((char*)&serial_secondary_screen_buffer[1], screen_data_buffer, sizeof(screen_data_buffer));
+
+      // Set index 0 to indicate a connection has been established
+      serial_secondary_screen_buffer[0] = 1;
+
+      // Make sure to zero terminate the buffer
+      serial_secondary_screen_buffer[sizeof(serial_secondary_screen_buffer) - 1] = 0;
+
+      // Indicate that the screen data has changed and needs transferring to the secondary side
+      uprintln("hid_screen_change = true");
+      hid_screen_change = true;
+    }
+  }
+}
+
+char hid_info_str[20];
+const char *write_hid(void) {
+  snprintf(hid_info_str, sizeof(hid_info_str), "%s", is_hid_connected ? "connected." : " ");
+  return hid_info_str;
+}
+
+void write_secondary_info_screen(void) {
+  // if (serial_secondary_screen_buffer[0] > 0) {
+    // If the first byte of the buffer is non-zero we should have a full set of data to show,
+    // So we copy it into the display
+    // oled_clear();
+    // oled_write_P((char*)&serial_secondary_screen_buffer, false);
+  // }
+}
 
 #ifdef OLED_ENABLE
 oled_rotation_t oled_init_user(oled_rotation_t rotation) { return OLED_ROTATION_180; }
@@ -224,7 +352,7 @@ bool oled_task_user(void) {
         oled_write_P(led_usb_state.caps_lock   ? PSTR("CAPLCK ") : PSTR("       "), false);
         oled_write_P(led_usb_state.scroll_lock ? PSTR("SCRLCK ") : PSTR("       "), false);
     } else {
-        // oled_write_raw_P(kyria_logo, sizeof(kyria_logo));
+        // write_secondary_info_screen();
     }
     return false;
 }
@@ -232,65 +360,52 @@ bool oled_task_user(void) {
 
 #ifdef ENCODER_ENABLE
 bool encoder_update_user(uint8_t index, bool clockwise) {
+  switch (biton32(layer_state)) {
+    case _ADJUST: {
+      // On the RGB layer we control the screen display with the encoder
+      if (clockwise) {
+        // Increment and loop back to beginning if we go over the max
+        screen_show_index++;
+        if (screen_show_index >= screen_max_count) {
+          screen_show_index = 0;
+        }
+      } else {
+        // Decrement and loop back to the end if we are about to go below zero,
+        // Be careful since index is unsigned.
+        if (screen_show_index == 0) {
+          screen_show_index = screen_max_count - 1;
+        } else {
+          screen_show_index--;
+        }
+      }
 
-    if (index == 0) {
+      // If we have a connection we should tell it about the change,
+      // Otherwise it will be notified when it first connects instead.
+      if (is_hid_connected) {
+        raw_hid_send_screen_index();
+      }
+      break;
+    }
+    default: {
+      if (index == 0) {
         // Volume control
         if (clockwise) {
-            tap_code(KC_VOLU);
+          tap_code(KC_VOLU);
         } else {
-            tap_code(KC_VOLD);
+          tap_code(KC_VOLD);
         }
-    } else if (index == 1) {
+      } else if (index == 1) {
         // Page up/Page down
         if (clockwise) {
-            tap_code(KC_PGDN);
+          tap_code(KC_PGDN);
         } else {
-            tap_code(KC_PGUP);
+          tap_code(KC_PGUP);
         }
+      }
     }
+  }
+
     return false;
 }
 #endif
 
-// HERE BEGINS DATA SYNC STUFF
-typedef struct _primary_to_secondary_t {
-    int m2s_data;
-} primary_to_secondary_t;
-
-typedef struct _secondary_to_primary_t {
-    int s2m_data;
-} secondary_to_primary_t;
-
-void user_sync_a_secondary_handler(uint8_t in_buflen, const void* in_data, uint8_t out_buflen, void* out_data) {
-    const primary_to_secondary_t *m2s = (const primary_to_secondary_t*)in_data;
-    secondary_to_primary_t *s2m = (secondary_to_primary_t*)out_data;
-    int result = m2s->m2s_data + 1;
-    s2m->s2m_data = result; // whatever comes in, add 5 so it can be sent back
-    char buffer[20];
-    sprintf(buffer, "%d", result);
-    oled_clear();
-    oled_write_ln(buffer, false);
-}
-
-void keyboard_post_init_user(void) {
-    transaction_register_rpc(USER_SYNC_A, user_sync_a_secondary_handler);
-}
-
-primary_to_secondary_t m2s = {0};
-secondary_to_primary_t s2m = {0};
-
-void housekeeping_task_user(void) {
-    if (is_keyboard_master()) {
-        // Interact with secondary every 500ms
-        static uint32_t last_sync = 0;
-        if (timer_elapsed32(last_sync) > 500) {
-            if(transaction_rpc_exec(USER_SYNC_A, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
-                last_sync = timer_read32();
-                m2s.m2s_data = s2m.s2m_data;
-                dprintf("Secondary value: %d\n", m2s.m2s_data); // this will have incremented
-            } else {
-                dprint("Secondary sync failed!\n");
-            }
-        }
-    }
-}

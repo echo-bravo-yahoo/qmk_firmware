@@ -22,11 +22,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 //#define USE_MATRIX_I2C
 
-/* Select hand configuration */
-
-#define MASTER_LEFT
-// #define MASTER_RIGHT
-// #define EE_HANDS
+// determine if left or right based on eeprom (flash them as left/right)
+#define EE_HANDS
 
 // https://docs.qmk.fm/#/tap_hold
 #define TAPPING_TERM 175

@@ -137,3 +137,6 @@ via*.json
 # Bootstrap-generated YAML — regenerable from keymap.c via
 # scripts/draw-keymap.sh, would create diff churn on every render.
 /keyboards/**/keymap.yaml
+
+# cc-allow session-scoped state (auto-cleaned after 30d).
+/.config/cc-allow/sessions/

@@ -128,3 +128,12 @@ compile_commands.json
 via*.json
 /keyboards/**/keymaps/via/*
 /keyboards/**/keymaps/vial/*
+
+# keymap-drawer artifacts: track the SVGs co-located with their keymaps,
+# overriding the *.svg rule above. The wildcard catches both keymap.svg
+# and split-orientation forms like keymap.left-hand.svg / keymap.right-hand.svg.
+!/keyboards/**/keymap*.svg
+
+# Bootstrap-generated YAML — regenerable from keymap.c via
+# scripts/draw-keymap.sh, would create diff churn on every render.
+/keyboards/**/keymap.yaml

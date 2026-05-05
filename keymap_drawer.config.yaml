@@ -1,0 +1,148 @@
+draw_config:
+  key_w: 64.0
+  key_h: 56.0
+  split_gap: 30.0
+  inner_pad_w: 2.0
+  inner_pad_h: 2.0
+  outer_pad_w: 30.0
+  outer_pad_h: 56.0
+  shrink_wide_legends: 6
+  glyph_tap_size: 14
+  glyph_hold_size: 11
+
+parse_config:
+  preprocess: true
+
+  # raw_binding_map shortcuts the parser before layer-index lookup, which lets
+  # us render keycodes that reference layers absent from the C source (OSL(1)
+  # in ploopyco/madromys/aeby points at a layer commented out in keymap.c).
+  raw_binding_map:
+    "OSL(1)": {t: OSL, h: "1"}
+    # Home-row mod-tap legends. modifier_fn_map only fires for modifier-function
+    # keycodes (LCTL(...) etc.) — mod-tap holds keep the bare shortname unless
+    # remapped here.
+    "LGUI_T(KC_A)": {t: A, h: "⌘"}
+    "LALT_T(KC_S)": {t: S, h: "⌥"}
+    "LCTL_T(KC_D)": {t: D, h: "⌃"}
+    "LSFT_T(KC_F)": {t: F, h: "⇧"}
+    "RSFT_T(KC_J)": {t: J, h: "⇧"}
+    "RCTL_T(KC_K)": {t: K, h: "⌃"}
+    "RALT_T(KC_L)": {t: L, h: "⌥"}
+    "RGUI_T(KC_SCLN)": {t: ";", h: "⌘"}
+    # Tap-dance and keymap-level customs (raw_binding_map matches the parsed
+    # keycode string before any KC_-stripping, so it works for non-KC keys too).
+    "TD(TD_CCP)": {t: "C/V/X", h: ""}
+    "WIN_PREV": "←Space"
+    "WIN_NEXT": "Space→"
+    "WIN_OVRV": "Overview"
+
+  modifier_fn_map:
+    left_ctrl: "⌃"
+    right_ctrl: "⌃"
+    left_shift: "⇧"
+    right_shift: "⇧"
+    left_alt: "⌥"
+    right_alt: "⌥"
+    left_gui: "⌘"
+    right_gui: "⌘"
+    keycode_combiner: "{mods}{key}"
+    mod_combiner: "{mod_1}{mod_2}"
+
+  # Overrides keymap-drawer's built-in qmk_keycode_map wholesale, so the
+  # punctuation defaults must be re-stated here alongside our additions.
+  qmk_keycode_map:
+    XXXXXXX: ""
+    "NO": ""
+    MINUS: "-"
+    MINS: "-"
+    EQUAL: "="
+    EQL: "="
+    LEFT_BRACKET: "["
+    LBRC: "["
+    RIGHT_BRACKET: "]"
+    RBRC: "]"
+    BACKSLASH: \
+    BSLS: \
+    SEMICOLON: ;
+    SCLN: ;
+    QUOTE: "'"
+    QUOT: "'"
+    GRAVE: "`"
+    GRV: "`"
+    COMMA: ","
+    COMM: ","
+    DOT: .
+    SLASH: /
+    SLSH: /
+    LEFT_PAREN: (
+    LPRN: (
+    RIGHT_PAREN: )
+    RPRN: )
+    LSFT: ⇧
+    LEFT_SHIFT: ⇧
+    LCTL: ⌃
+    LEFT_CTRL: ⌃
+    LALT: ⌥
+    LEFT_ALT: ⌥
+    LGUI: ⌘
+    LEFT_GUI: ⌘
+    RSFT: ⇧
+    RIGHT_SHIFT: ⇧
+    RCTL: ⌃
+    RIGHT_CTRL: ⌃
+    RALT: ⌥
+    RIGHT_ALT: ⌥
+    RGUI: ⌘
+    RIGHT_GUI: ⌘
+    BTN1: L click
+    BTN2: R click
+    BTN3: M click
+    DRAG_SCROLL: Drag scroll
+    MPLY: ⏯
+    MPRV: ⏮
+    MNXT: ⏭
+    MUTE: 🔇
+    VOLD: 🔉
+    VOLU: 🔊
+    PGUP: PgUp
+    PGDN: PgDn
+    HOME: Home
+    END: End
+    LEFT: ←
+    DOWN: ↓
+    UP: ↑
+    RGHT: →
+    RIGHT: →
+    BSPC: Bspc
+    DEL: Del
+    ENT: Enter
+    SPC: ␣
+    TAB: Tab
+    ESC: Esc
+
+    # KillerWhale custom keycodes — clean labels for the visualization.
+    MOD_SCRL: Scroll
+    INV_SCRL: Inv Scroll
+    L_CHMOD: DPad mode
+    R_CHMOD: DPad mode
+    AUTO_MOUSE: Auto Mouse
+    OLED_MOD: OLED mode
+    CMD_CTL: ⌘/Ctl
+    CAPTCHA: Screenshot
+    UG_TOGG: Toggle RGB
+    UG_NEXT: Next anim
+    UG_PREV: Prev anim
+    UG_HUEU: Hue+
+    UG_HUED: Hue−
+    UG_SATU: Sat+
+    UG_SATD: Sat−
+    UG_VALU: Bright+
+    UG_VALD: Bright−
+    UG_SPDU: RGB Spd+
+    UG_SPDD: RGB Spd−
+    QK_USER_4: Slow
+    QK_USER_15: RGB/Layer
+    SH_MON: Mirror
+    WIN_PREV: ←Space
+    WIN_NEXT: Space→
+    WIN_OVRV: Overview

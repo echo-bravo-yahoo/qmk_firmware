@@ -1,0 +1,18 @@
+{
+  "keyboard_name": "Mouse",
+  "comment": "Stylized top-down mouse: two thumb buttons (M5 forward / M4 back, stacked) on the far left, then the L button, the 3-segment scroll wheel (up / click / down), and the R button. Seven cells, one row. Use as `qmk_info_json: layouts/mouse.json` from a game-binding YAML.",
+  "matrix_size": { "rows": 1, "cols": 7 },
+  "layouts": {
+    "LAYOUT": {
+      "layout": [
+        { "matrix": [0, 0], "label": "Thumb forward", "x": 0,    "y": 0.25, "w": 0.6, "h": 0.75 },
+        { "matrix": [0, 1], "label": "Thumb back",    "x": 0,    "y": 1.1,  "w": 0.6, "h": 0.75 },
+        { "matrix": [0, 2], "label": "Left",          "x": 0.8,  "y": 0,    "w": 1.5, "h": 2 },
+        { "matrix": [0, 3], "label": "WheelUp",       "x": 2.4,  "y": 0,    "w": 0.8, "h": 0.6 },
+        { "matrix": [0, 4], "label": "WheelClick",    "x": 2.4,  "y": 0.7,  "w": 0.8, "h": 0.6 },
+        { "matrix": [0, 5], "label": "WheelDn",       "x": 2.4,  "y": 1.4,  "w": 0.8, "h": 0.6 },
+        { "matrix": [0, 6], "label": "Right",         "x": 3.3,  "y": 0,    "w": 1.5, "h": 2 }
+      ]
+    }
+  }
+}

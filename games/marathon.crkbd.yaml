@@ -1,0 +1,65 @@
+# Marathon (Bungie, 2026) keybinding cheat sheet for the Corne split_3x6_3.
+#
+# Bindings are the default PC keyboard preset (per the v1.0.5 patch).
+# Assumes the keyboard is in its GAMING layer — plain alphas, plain thumbs,
+# Shift / Ctrl on the outer-left column rows 2 / 3.
+#
+# Weapon swap (1 / 2 / 3) and Equipment Radial (5) need a number row, which
+# Corne split_3x6_3 doesn't have — they're on the NumSym layer (hold left
+# inner-thumb on BASE) but that LT is disabled in GAMING. Reach those
+# weapons via Loadout (Tab) or scroll-wheel cycling instead, or rebind one
+# of the GAMING thumb keys to LT(NUMSYM, …) if you want number access.
+
+layout: { qmk_keyboard: crkbd/rev1, layout_name: LAYOUT_split_3x6_3 }
+
+layers:
+  Marathon:
+    # Q-row: top of the alpha block
+    - ""           # outer L
+    - "Prime"      # Q  — Prime Ability
+    - "Forward"    # W
+    - "Interact"   # E
+    - "Reload"     # R
+    - "Knife"      # T  — Switch to Knife (rebound from default 3)
+    - ""           # Y
+    - ""           # U
+    - "Loadout"    # I  — Open Loadout (alt to Tab)
+    - ""           # O
+    - ""           # P
+    - ""           # outer R
+
+    # A-row: middle (home row)
+    - "Sprint"     # outer L  (KC_LSFT in GAMING)
+    - "Left"       # A  — Move Left
+    - "Back"       # S
+    - "Right"      # D
+    - "Tactical"   # F  — Tactical Ability
+    - "Equipment"  # G  — Use Equipment
+    - ""           # H
+    - ""           # J
+    - ""           # K
+    - ""           # L
+    - ""           # ;
+    - ""           # outer R
+
+    # Z-row: bottom
+    - "Crouch"     # outer L  (KC_LCTL in GAMING)
+    - "Wpn Ability" # Z
+    - ""           # X
+    - "Melee"      # C  — Quick Melee
+    - "Trait"      # V  — Trait Ability
+    - "Talk"       # B  — Push-to-Talk (rebound from default T)
+    - ""           # N
+    - "Map"        # M
+    - ""           # ,
+    - ""           # .
+    - ""           # /
+    - ""           # outer R
+
+    # Thumbs (left: LAlt / Space / Tab; right: Del / Bspc / Enter)
+    - ""           # left outer  — KC_LALT, unbound in Marathon
+    - "Jump"       # left middle — Space
+    - "Loadout"    # left inner  — Tab
+    - ""           # right outer — Del, unbound
+    - ""           # right middle — Bspc, unbound
+    - "Chat"       # right inner — Enter

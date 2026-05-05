@@ -134,6 +134,10 @@ via*.json
 # and split-orientation forms like keymap.left-hand.svg / keymap.right-hand.svg.
 !/keyboards/**/keymap*.svg
 
+# Hand-authored game cheat-sheet SVGs — rendered by scripts/draw-game.sh
+# from games/*.yaml + layouts/mouse.json.
+!/games/*.svg
+
 # Bootstrap-generated YAML — regenerable from keymap.c via
 # scripts/draw-keymap.sh, would create diff churn on every render.
 /keyboards/**/keymap.yaml

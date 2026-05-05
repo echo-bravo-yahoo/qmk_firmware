@@ -1,0 +1,16 @@
+# Marathon (Bungie, 2026) mouse cheat sheet — companion to marathon.crkbd.svg.
+# Cells in left-to-right order:
+#   Thumb forward, Thumb back, Left button, Wheel up, Wheel click, Wheel down, Right button.
+# Defaults don't bind the thumb buttons — fill in once mapped in-game.
+
+layout: { qmk_info_json: layouts/mouse.json }
+
+layers:
+  Marathon mouse:
+    - ""            # Thumb forward (M5)
+    - ""            # Thumb back    (M4)
+    - "Fire"        # Left click
+    - "Weapon 1"    # Wheel up
+    - "Ping"        # Wheel click
+    - "Weapon 2"    # Wheel down
+    - "Alt Fire"    # Right click

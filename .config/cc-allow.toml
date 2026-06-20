@@ -6,3 +6,11 @@ commands = [
   "qmk",
   "path:$PROJECT_ROOT/scripts/**",
 ]
+
+# Allow docker run for QMK compilation (scoped to qmkfm image + --rm)
+[[bash.allow.docker.run]]
+args.all = ["--rm", "re:^qmkfm[/]"]
+
+# Allow cmd.exe for Windows username lookup (used to build the Downloads path)
+[[bash.allow."cmd.exe"]]
+args.all = ["/c"]

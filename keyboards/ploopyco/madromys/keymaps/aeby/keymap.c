@@ -48,9 +48,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         LALT(KC_TAB), // top outer left
         OSL(1), // top inner left
         DRAG_SCROLL, // top inner right
-        KC_BTN2, // top outer right
-        KC_BTN1, // bottom left
-        KC_BTN3 // bottom right
+        MS_BTN2, // top outer right
+        MS_BTN1, // bottom left
+        MS_BTN3 // bottom right
     )
 
     // put window movement on this one-shot-accessible layer

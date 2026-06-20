@@ -6,6 +6,7 @@
         "vid": "0x4653"
     },
     "features": {
+    "_comment": "aeby: upstream flipped rgblight=false/rgb_matrix=true; original rules.mk had RGBLIGHT_ENABLE=yes, RGB_MATRIX_ENABLE=no — verify which LED driver your build actually needs",
         "bootmagic": true,
         "extrakey": true,
         "nkro": true,

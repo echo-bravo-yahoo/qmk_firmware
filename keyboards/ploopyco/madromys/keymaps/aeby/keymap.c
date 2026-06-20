@@ -17,6 +17,29 @@
  */
 #include QMK_KEYBOARD_H
 
+#define LCLICK_SETTLE_MS 40
+
+static bool     lclick_held  = false;
+static uint32_t lclick_timer = 0;
+
+report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
+    if (mouse_report.buttons & MOUSE_BTN1) {
+        if (!lclick_held) {
+            lclick_held  = true;
+            lclick_timer = timer_read32();
+        }
+    } else {
+        lclick_held = false;
+    }
+
+    if (lclick_held && timer_elapsed32(lclick_timer) < LCLICK_SETTLE_MS) {
+        mouse_report.x = 0;
+        mouse_report.y = 0;
+    }
+
+    return mouse_report;
+}
+
 #define PLOOPY_DPI_OPTIONS { 1200 }
 #define PLOOPY_DPI_DEFAULT 0
 

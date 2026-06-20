@@ -31,10 +31,44 @@ Then bootload the board and copy the UF2 to the RPI drive.
 ## [Corne (white, busted)](./keyboards/crkbd)
 
 - Microcontroller: Elite-C x 2
-- Build left side: `qmk flash -kb crkbd/rev1 -km aeby -bl dfu-splift-left`
-- Build right side: `qmk flash -kb crkbd/rev1 -km aeby -bl dfu-splift-right`
 - Bootload: Plug in while holding reset
-- Flash: Using `qmk flash ...` command above. Run `qmk flash ...` before plugging the bootload-mode keyboard in.
+
+### Build workflow
+
+Compile via Docker (same as Ploopy Adept — Docker has the AVR toolchain):
+
+```bash
+docker run --rm -v ~/workspace/qmk:/qmk_firmware qmkfm/qmk_cli \
+  qmk compile -kb crkbd/rev1 -km aeby
+```
+
+HEX lands at `~/workspace/qmk/crkbd_rev1_aeby.hex`.
+
+### Flash workflow
+
+Docker can't see USB, so flashing uses a local script. One-time prereqs:
+
+```bash
+sudo apt-get install dfu-programmer
+```
+
+USB passthrough from Windows (run in PowerShell, keep open or use `--auto-attach`):
+
+```powershell
+usbipd list                               # find busid for "ATm32U4DFU" / "Caterina"
+usbipd attach --wsl --busid <busid> --auto-attach
+```
+
+Then flash each half from WSL. Run the script first, then bootload:
+
+```bash
+~/workspace/qmk/scripts/flash-crkbd.sh left
+# bootload left half — script polls until it detects the board, then flashes
+~/workspace/qmk/scripts/flash-crkbd.sh right
+# bootload right half
+```
+
+The script writes the EE_HANDS EEPROM byte (handedness) in addition to the firmware.
 
 ## [Corne (blue, new)](./keyboards/crkbd)
 

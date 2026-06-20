@@ -1,3 +1,5 @@
+All boards compile via the `qmkfm/qmk_cli` Docker image — no local QMK toolchain needed.
+
 ## [Ploopy adept](./keyboards/ploopyco/madromys)
 
 - Bootload: Plug in while holding the bottom left button down

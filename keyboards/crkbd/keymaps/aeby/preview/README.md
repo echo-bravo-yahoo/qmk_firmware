@@ -8,22 +8,26 @@ ctypes bridge — the single source of truth for both the device and the preview
 ## World model — class designations
 
 A journey is the Patna transiting **within a proper-named system** (a gas giant / star) to a
-destination body. The destination's **survey designation is a label of that body's class**, after the
-Weyland-Yutani colonial-survey classification in _Aliens_ — derived from the chosen body, not supplied
-as input:
+destination body. The destination's **survey designation is a label derived from that body's intrinsic
+properties** — orbital role, composition, and a derived life-viability — not supplied as input. `LV`
+means **Life-Viable**: a habitability class that spans moons _and_ rocky planets (canon: LV-426 is a
+moon, LV-178/895 are planets), orthogonal to orbital role; minor bodies and gas giants are excluded:
 
-| Destination body      | Prefix | Meaning                       | Serial range | Canon anchor               |
-| --------------------- | ------ | ----------------------------- | ------------ | -------------------------- |
-| moon                  | `LV`   | **L**ife **V**iable           | 100–1299     | LV-426 (Acheron)           |
-| gas-giant planet      | `KG`   | Jovian survey                 | 100–999      | KG-348                     |
-| colony / rocky planet | `BG`   | colony world                  | 100–999      | BG-386                     |
-| trojan / vagrant      | `RF`   | minor-body catalog (invented) | 1000–9999    | none — lore-plausible code |
+| Prefix | Assigned when (properties)                                | Meaning              | Serial range | Canon anchor |
+| ------ | --------------------------------------------------------- | -------------------- | ------------ | ------------ |
+| `LV`   | life-viable world — moon **or** rocky planet, in the band | **L**ife-**V**iable  | 100–1299     | LV-426       |
+| `KG`   | gas giant (by composition)                                | Jovian survey        | 100–999      | KG-348       |
+| `BG`   | rocky world, **not** life-viable (out of band / barren)   | colony / barren rock | 100–999      | BG-386       |
+| `RF`   | minor body (trojan / vagrant)                             | minor-body catalog   | 1000–9999    | none         |
 
-Gas-giant vs colony class is **derived** (not stored): outer, wider orbits skew Jovian (`KG`), inner
-orbits skew rocky (`BG`), with a deterministic `(seed, idx)` hash deciding the mid-belt — so no
-`starmap_body_t` field is needed and the ctypes mirror stays stable. The serial is a deterministic
-hash of `(seed, dest_idx)` into the per-prefix range; every form is ≤ 7 chars, fitting `designation[8]`
-and the 8-col OLED. `RF` is invented (canon only fixes LV/KG/BG), kept short and lore-plausible.
+Life-viability, gas-giant class, and serial are all **derived** (not stored): a `(seed, idx)` hash plus
+the body's orbital radius (a moon inherits its parent planet's) decides the class, so no
+`starmap_body_t` field is needed and the ctypes mirror stays stable. A deterministic viability roll
+leaves some in-band worlds barren (`BG`) so `LV` stays meaningful. The serial is a hash of
+`(seed, dest_idx)` into the per-prefix range; every form is ≤ 7 chars, fitting `designation[8]` and the
+8-col OLED. `RF` is invented (canon only fixes LV/KG/BG), kept short and lore-plausible.
+
+**Full rationale + sources:** [`.claude/docs/world-classification.md`](../.claude/docs/world-classification.md).
 
 Each journey names a system via a syllable grammar (CALPAMOS, NIMBULON, SORVAT…). The **input token is
 purely a seed** (djb2 → LCG): the same token always yields the same bodies, Lagrange geometry, name,
@@ -109,9 +113,10 @@ uv run --with pytest --with pillow pytest -q
 ```
 
 Covers determinism (token → identical struct), in-bounds geometry, route endpoints landing on the
-departure/destination bodies, class-correct designations (moon→LV, gas-giant→KG, rocky→BG,
-trojan/vagrant→RF, prefixes varying across a sweep), Lagrange geometry (±60° / collinear), ring
-connectivity (regression for the old broken-ring rasterizer), and even dash coverage.
+departure/destination bodies, property-derived designations (`LV` only on life-viable moons/rocky
+planets, never on minor bodies; gas-giant→`KG`; rocky-non-viable→`BG`; trojan/vagrant→`RF`; all four
+prefixes appearing across a sweep), Lagrange geometry (±60° / collinear), ring connectivity (regression
+for the old broken-ring rasterizer), and even dash coverage.
 
 It also drives the journey state machine (boot picks a fresh route, clock-tracked progress, arrival →
 next route) and the phase/burn model: the STATUS phase sequence (`DEPART → TRANSIT → FLYBY/COAST →

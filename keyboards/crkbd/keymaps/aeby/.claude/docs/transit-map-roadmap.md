@@ -162,3 +162,30 @@ frame (~38% of a seed sweep).
   `gfx_route_draw_banner`, baked at the end of `gfx_route_draw_bg` so `route_anim.c`'s bake site is
   unchanged (`oled_gfx.c`); the Tom Thumb glyph table shared via `gfx_tomthumb_font()`
   (`glcdfont_tomthumb.c`). Host struct mirror + banner/class tests in `preview/`.
+
+## Life-viable designation — as built
+
+The survey designation (`LV`/`KG`/`BG`/`RF`) is now a pure downstream label of the destination's
+**intrinsic properties** — orbital role, composition, and a derived **life-viability** — rather than a
+switch on body type. `LV` means **Life-Viable**, not "moon": it spans moons _and_ rocky planets
+(canon-faithful — LV-426 is a moon, LV-178/895 are planets), so a habitable moon of a band gas giant
+reads `LV` (the LV-426/Calpamos shape).
+
+- **Predicate.** `sw_is_life_viable` (`starmap_world.c`): major rocky body (not a trojan/vagrant, not a
+  gas giant) × orbital radius in the habitable band `[SW_HZ_MIN, SW_HZ_MAX]` = `[34, 82]` wu × a
+  deterministic `(seed, idx)` viability roll. A moon inherits its parent planet's heliocentric distance.
+  Derived, **not stored** — mirrors `sw_is_gas_giant`, so no `starmap_body_t` field and the ctypes mirror
+  stays stable; pure `(seed, idx)` hash with no RNG-stream draws, so topology/ETA rolls and host==device
+  are untouched.
+- **Decision order** in `starmap_designation` (now takes the system, to look up a moon's parent): minor
+  body → `RF`; gas giant → `KG`; life-viable → `LV`; else rocky-non-viable → `BG`. **Trojans and gas
+  giants are excluded from `LV`** — a trojan must be ≪ its host for L4/L5 stability (so it's asteroidal,
+  airless), and a gas giant has no surface. The viability roll leaves some in-band worlds barren (`BG`) so
+  `LV` stays meaningful. Seed sweep: ~16% `LV`, ~32% `KG`, ~32% `BG`, ~20% `RF`.
+- **Spectral class is unchanged** — still keyed on physical type (reflectance taxonomy), independent of
+  the designation. A life-viable `LV` world still shows its surface reflectance class (e.g. `S3`), by
+  decision.
+- Full enumeration + rationale + canon/science sources:
+  [`.claude/docs/world-classification.md`](world-classification.md).
+- **Code:** `sw_is_life_viable` + `SW_HZ_*`/`SW_SALT_VIABLE` and the rewritten `starmap_designation`
+  (`starmap_world.c` / `.h`); property-aware designation tests in `preview/test_route.py`.

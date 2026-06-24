@@ -4,9 +4,11 @@
  * A "system" is a proper-named gas giant / star (e.g. Calpamos) with a handful
  * of planets, moons, trojans and the occasional vagrant. A journey transits the
  * USCSS Patna within that system to a destination body whose survey designation
- * reflects its class — a moon reads "LV-NNN", a gas giant "KG-NNN", a colony
- * world "BG-NNN", a minor body "RF-NNNN" (see starmap_designation and
- * preview/README.md).
+ * is derived from its intrinsic properties — orbital role, composition and a
+ * derived life-viability: a life-viable world (moon OR rocky planet in the
+ * habitable band) reads "LV-NNN", a gas giant "KG-NNN", a rocky-but-not-viable
+ * world "BG-NNN", a minor body (trojan/vagrant) "RF-NNNN" (see
+ * starmap_designation, preview/README.md, and .claude/docs/world-classification.md).
  *
  * A seed token seeds everything deterministically (djb2): the same token always
  * yields the same bodies, the same Lagrange geometry, and the same proper name.
@@ -80,7 +82,9 @@ static inline int32_t starmap_rng_range(starmap_rng_t *r, int32_t lo, int32_t hi
 }
 /* Uniform float in [0, 1). */
 static inline float starmap_rng_float(starmap_rng_t *r) {
-    return (float)(starmap_rng_next(r) >> 8) / (float)(1 << 24);
+    /* 1UL << 24: on AVR `int` is 16-bit, so a plain `1 << 24` is UB
+     * (shift >= width); the unsigned-long literal makes 2^24 well-defined. */
+    return (float)(starmap_rng_next(r) >> 8) / (float)(1UL << 24);
 }
 
 /* djb2 over the seed token — the deterministic seed. */
@@ -88,18 +92,25 @@ uint32_t starmap_seed(const char *designation);
 
 /* Build the full deterministic system for a seed token. The token only seeds the
  * world (djb2 → LCG); the displayed designation is derived from the destination
- * body's class — see starmap_designation. */
+ * body's properties — see starmap_designation. */
 void starmap_build(const char *designation, starmap_system_t *out);
 
-/* Survey designation derived from the destination body's class (canon-grounded):
- *   moon             → "LV-NNN"  (Life Viable;  serial 100–1299)
- *   gas-giant planet → "KG-NNN"  (Jovian;       serial 100–999)
- *   rocky planet     → "BG-NNN"  (colony world; serial 100–999)
- *   trojan / vagrant → "RF-NNNN" (minor body;   serial 1000–9999, invented)
- * Serial is a deterministic hash of (seed, idx); gas-giant class is derived from
- * orbital radius + a (seed,idx) hash (no starmap_body_t field, so the ctypes
- * mirror stays stable). out must hold STARMAP_DESIG_LEN bytes. */
-void starmap_designation(uint32_t seed, const starmap_body_t *body, int idx,
+/* Survey designation derived from the destination body's properties — orbital
+ * role, composition, and a derived life-viability (canon-grounded):
+ *   life-viable world → "LV-NNN"  (moon OR rocky planet in the habitable band;
+ *                                  serial 100–1299; LV-426 moon, LV-178/895 planets)
+ *   gas-giant planet  → "KG-NNN"  (Jovian;            serial 100–999; KG-348)
+ *   rocky, not viable → "BG-NNN"  (barren / colony;   serial 100–999; BG-386)
+ *   trojan / vagrant  → "RF-NNNN" (minor body;        serial 1000–9999, invented)
+ * LV spans moons and rocky planets (it is a habitability class, orthogonal to
+ * orbital role); minor bodies and gas giants are excluded from LV. Decision order:
+ * minor body → gas giant → life-viable → else rocky-non-viable. Needs the system
+ * (not just the body) so a moon's life-viability can read its parent planet's
+ * heliocentric distance. Serial is a deterministic hash of (seed, idx); gas-giant
+ * and life-viable classes are derived (no starmap_body_t field, so the ctypes
+ * mirror stays stable). See .claude/docs/world-classification.md for the full
+ * rationale. out must hold STARMAP_DESIG_LEN bytes. */
+void starmap_designation(uint32_t seed, const starmap_system_t *sys, int idx,
                          char out[STARMAP_DESIG_LEN]);
 
 /* Destination spectral class — the banner's second line. Sub-stellar bodies are

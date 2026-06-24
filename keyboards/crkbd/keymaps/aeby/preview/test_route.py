@@ -97,6 +97,79 @@ def test_designation_deterministic():
         assert g.generate_route(d)['designation'] == g.generate_route(d)['designation']
 
 
+# ── Destination spectral class + space-filling banner ─────────────────────────
+
+RG_MARGIN_X      = 12   # must match route_gen.c
+RG_BANNER_GUTTER = 3    # must match RG_BANNER_GUTTER
+RG_BANNER_MIN_W  = 12   # must match RG_BANNER_MIN_W
+
+# Wide sweep so both banner and non-banner routes appear (banners are occasional).
+BANNER_DESIGS = [f"LV-{n}" for n in range(100, 900)]
+
+# Allowed dest_class per destination body type. Sub-stellar bodies use reflectance
+# taxonomies: gas giants → Sudarsky roman I–V; everything else → "<letter><digit>"
+# from a per-type pool (see starmap_spectral_class).
+_ROMAN = {"I", "II", "III", "IV", "V"}
+
+def _class_ok(body_type, c):
+    if body_type == g.STARMAP_MOON:
+        return len(c) == 2 and c[0] in "CDPS" and c[1].isdigit()
+    if body_type == g.STARMAP_TROJAN:
+        return len(c) == 2 and c[0] in "DPXCSV" and c[1].isdigit()
+    if body_type == g.STARMAP_VAGRANT:
+        return len(c) == 2 and c[0] in "DPCXSV" and c[1].isdigit()
+    if body_type == g.STARMAP_PLANET:           # gas giant (roman) or rocky (<L><d>)
+        return c in _ROMAN or (len(c) == 2 and c[0] in "SQVMK" and c[1].isdigit())
+    return False
+
+
+def test_dest_class_valid_and_deterministic():
+    seen = set()
+    for d in BANNER_DESIGS:
+        s = g.build_system(d)
+        c = g.generate_route(d)['dest_class']
+        seen.add(c)
+        assert 0 < len(c) <= 3, f"{d}: dest_class {c!r} wrong length"
+        bt = s.bodies[s.dest_idx].type
+        assert _class_ok(bt, c), f"{d}: dest_class {c!r} invalid for body type {bt}"
+        assert g.generate_route(d)['dest_class'] == c, f"{d}: dest_class not deterministic"
+    # Classes vary across the sweep, and gas-giant romans do occur.
+    assert len(seen) > 5, f"dest_class barely varies: {seen}"
+    assert seen & _ROMAN, "no gas-giant roman class appeared across the sweep"
+
+
+def _route_right_extent(r):
+    """Rightmost lit x of the route alone, banner suppressed — the extent the banner
+    must clear."""
+    pts = lit_pixels(g.bake_bg({**r, 'banner_x': 0, 'banner_w': 0}))
+    return max(x for x, _ in pts)
+
+
+def test_banner_geometry_in_bounds_and_clear():
+    n_banner = 0
+    for d in BANNER_DESIGS:
+        r = g.generate_route(d)
+        bw = r['banner_w']
+        assert bw == 0 or bw >= RG_BANNER_MIN_W, f"{d}: sub-floor banner width {bw}"
+        if bw == 0:
+            assert r['banner_x'] == 0
+            continue
+        n_banner += 1
+        # Stays inside the right margin.
+        assert r['banner_x'] + bw <= 128 - RG_MARGIN_X, \
+            f"{d}: banner [{r['banner_x']},{r['banner_x']+bw}) past right margin"
+        # Sits clear of (never overlaps) the route's rendered extent.
+        assert r['banner_x'] > _route_right_extent(r), \
+            f"{d}: banner_x {r['banner_x']} overlaps route extent"
+    assert n_banner > 0, "no banner appeared across the sweep — feature never exercised"
+
+
+def test_some_routes_have_no_banner():
+    # Best-fit framing + orbital rings usually fill the panel, so the banner is an
+    # occasional accent, not every frame.
+    assert any(g.generate_route(d)['banner_w'] == 0 for d in BANNER_DESIGS)
+
+
 # ── Everything drawn lands on the panel ───────────────────────────────────────
 
 def test_geometry_in_bounds():

@@ -65,7 +65,9 @@ without disturbing typing. State lives on the master (`g_journey`); the slave on
 - Live orbital drift (L) — advance planets/moons along their orbits over the multi-hour journey (periodic re-bake) so the system isn't frozen.
 - Terminal approach (M) — at t→1 spiral the ship into the destination moon's drawn orbit (insertion) instead of landing on a point.
 - Ship lore (S) — rotate USCSS Patna registry/cargo/crew flavor in telemetry.
-- Spectral class + Hohmann-ish timing (S–M) — give the primary a spectral class; scale ETA more physically by orbit radii.
+- Spectral class + Hohmann-ish timing (S–M) — **destination** spectral class done (the banner's second
+  line; see the last section). Remaining: give the **primary star** an emission spectral class (OBAFGKM);
+  scale ETA more physically by orbit radii.
 - Arrival flourish (S–M) — a short lock-on/flash beat at ARRIVED before the next journey.
 - Rare anomalies (M) — occasional special systems (binary star, derelict, rogue planet) with unique glyphs/telemetry.
 - Underglow tie-in (M) — RGBLIGHT is wired in config.h; hue by destination class, brightness pulse on burns.
@@ -104,3 +106,59 @@ A keypress abandons the current journey and jumps to a fresh system on demand.
   token, `route_gen_build()` the next system, `gfx_route_bake_bg()` the new background. The slave picks
   up the new route on the next telemetry sync.
 - Semantically identical to the on-arrival auto-regen — re-roll is just "skip to the next mission now."
+
+## Destination-class banner — as built
+
+When best-fit framing + orbital rings don't fill the panel, a placard fills the wide x-gap on the
+destination side: the destination **designation** + its **spectral class**. Because the framing and rings
+usually fill the panel, it's an occasional accent on genuinely compact routes — suits ambiance, not every
+frame (~38% of a seed sweep).
+
+- **Principle.** After the route is framed, measure its rendered x-extent. The leftover beyond it is the
+  banner budget. _Narrow leftover → a slim vertical (rotated) label that uses the tall axis; wider →
+  a horizontal CRT-readout; widest → a framed 2× placard; below a floor → nothing (center as before)._
+  The route shifts away from the strip (left-justified) so the journey still reads left→right with the
+  placard ahead of the destination.
+- **Measurement (gen-time, deterministic).** `rg_content_xspan` (`route_gen.c`) takes min/max display-x
+  over every ring's reach (`center ± radius`, incl. moon `local_center` arcs), each leg's sampled path,
+  and every marker / body with its pixel half-width — the leftmost→rightmost lit pixel without
+  rasterizing. The extent is **true, not panel-clamped**: a ring running off the right edge is clipped
+  today, but the left-justify shift would slide it back on-screen into the strip, so counting its
+  off-panel reach inflates `w_img` and suppresses the banner in exactly those cases. Leftover
+  `S = (128 − 2·RG_MARGIN_X) − w_img`; strip width `W_ban = S − gutter`. The shift is applied post-pack
+  (`rg_shift_route_x`) — equivalent to injecting an x-offset into the two centering sites, but ordered
+  after the measurement so there's no chicken-and-egg.
+- **Tiers** (by strip width `W_ban`; tunable `#define`s in `route_gen.c` / `oled_gfx.c`):
+
+    | `W_ban` (px) | Banner                                                                                 |
+    | ------------ | -------------------------------------------------------------------------------------- |
+    | `< 12`       | none — center the route (today's behavior)                                             |
+    | `12–29`      | vertical rotated designation, 1× (reads bottom→top); + class as a 2nd column if `≥ 24` |
+    | `30–55`      | horizontal 2-line readout: designation / class, in `[ ]` brackets (CRT-readout feel)   |
+    | `≥ 56`       | big: designation 2× + class 1× subline, thin frame (BURN-style)                        |
+
+- **Spectral class.** The destination is a sub-stellar body, classified by _reflectance_ spectra (not the
+  stellar OBAFGKM _emission_ scheme). `starmap_spectral_class` (`starmap_world.c`) draws from the real
+  taxonomy per body type — a pure `(seed, idx)` hash, **no** RNG-stream draws, so topology/ETA rolls and
+  host==device stay untouched:
+
+    | Body             | Scheme                            | Pool / format                                        |
+    | ---------------- | --------------------------------- | ---------------------------------------------------- |
+    | moon             | asteroid/KBO reflectance          | `{C,D,P,S}` + digit (captured / icy small bodies)    |
+    | gas-giant planet | Sudarsky (2000) I–V               | bare roman, by temperature / cloud chemistry         |
+    | rocky planet     | invented silicate/metal extension | `{S,Q,V,M,K}` + digit (terrestrials lack a real one) |
+    | trojan           | asteroid reflectance, D-heavy     | `{D,P,X,C,S,V}` + digit, weighted ~80% D-type        |
+    | vagrant          | asteroid reflectance, D-heavy     | `{D,P,C,X,S,V}` + digit, D-weighted                  |
+
+    Format mimics the stellar `G2V` shape (≤3 chars): letter classes read `<L><digit>` (`D4`), gas giants
+    the bare roman (`III`). The rocky pool is the one non-canonical extension — terrestrials have no real
+    reflectance class — in the spirit of the invented `RF` minor-body catalog.
+    Sources: [Asteroid spectral types](https://en.wikipedia.org/wiki/Asteroid_spectral_types),
+    [Sudarsky's gas giant classification](https://en.wikipedia.org/wiki/Sudarsky's_gas_giant_classification),
+    trojan D-type fractions per the Dark Energy Survey photometry ([arXiv:2211.10719](https://arxiv.org/pdf/2211.10719)).
+
+- **Code:** `starmap_spectral_class` (`starmap_world.c`); `rg_content_xspan` + `rg_shift_route_x` + the
+  `dest_class`/`banner_x`/`banner_w` pack (`route_gen.c`); `gfx_prim_text` / `gfx_prim_text_vertical` +
+  `gfx_route_draw_banner`, baked at the end of `gfx_route_draw_bg` so `route_anim.c`'s bake site is
+  unchanged (`oled_gfx.c`); the Tom Thumb glyph table shared via `gfx_tomthumb_font()`
+  (`glcdfont_tomthumb.c`). Host struct mirror + banner/class tests in `preview/`.

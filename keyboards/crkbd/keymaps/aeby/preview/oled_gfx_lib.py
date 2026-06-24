@@ -13,8 +13,11 @@ _DIR    = os.path.dirname(os.path.abspath(__file__))
 _KM     = os.path.dirname(_DIR)                 # keymaps/aeby
 # Firmware sources (the single source of truth) + the host-only QMK shim that
 # stands in for the timer / OLED / eeconfig symbols route_anim.c references.
+# glcdfont_tomthumb.c rides along so the banner's gfx_tomthumb_font() accessor is
+# defined in the .so (on device it comes in via the OLED driver's OLED_FONT_H).
 _FW_SRCS  = [os.path.join(_KM, f) for f in
-             ("oled_gfx.c", "route_gen.c", "starmap_world.c", "route_anim.c")]
+             ("oled_gfx.c", "route_gen.c", "starmap_world.c", "route_anim.c",
+              "glcdfont_tomthumb.c")]
 _HOST_SRCS = [os.path.join(_DIR, "host_qmk_shim.c")]
 _SRCS   = _FW_SRCS + _HOST_SRCS
 _HDRS   = ([os.path.join(_KM, f) for f in
@@ -96,6 +99,10 @@ class _GfxRoute(ctypes.Structure):
         ('eta_minutes',    ctypes.c_uint16),
         ('system_name',    ctypes.c_char * 12),
         ('designation',    ctypes.c_char * 8),
+        # Space-filling banner (append-only — see oled_gfx.h).
+        ('dest_class',     ctypes.c_char * 4),
+        ('banner_x',       ctypes.c_uint8),
+        ('banner_w',       ctypes.c_uint8),
     ]
 
 # Journey state machine (route_anim.h). Mirrors route_journey_t / route_telemetry_t.
@@ -245,6 +252,9 @@ def _struct_to_dict(s: _GfxRoute) -> dict:
         'eta_minutes': s.eta_minutes,
         'system_name': s.system_name.decode('ascii', 'replace'),
         'designation': s.designation.decode('ascii', 'replace'),
+        'dest_class': s.dest_class.decode('ascii', 'replace'),
+        'banner_x': s.banner_x,
+        'banner_w': s.banner_w,
     }
 
 
@@ -280,6 +290,9 @@ def _to_struct(d: dict) -> _GfxRoute:
     s.eta_minutes   = d.get('eta_minutes', 0)
     s.system_name   = d.get('system_name', '').encode('ascii', 'replace')[:11]
     s.designation   = d.get('designation', '').encode('ascii', 'replace')[:7]
+    s.dest_class    = d.get('dest_class', '').encode('ascii', 'replace')[:3]
+    s.banner_x      = d.get('banner_x', 0)
+    s.banner_w      = d.get('banner_w', 0)
     return s
 
 # ── Public API ────────────────────────────────────────────────────────────────

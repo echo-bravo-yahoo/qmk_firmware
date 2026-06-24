@@ -103,13 +103,13 @@ into the firmware. Flashing the wrong UF2 on a half swaps primary/secondary assi
 ```bash
 # Left half
 docker run --rm -v ~/workspace/qmk:/qmk_firmware qmkfm/qmk_cli \
-  make -C /qmk_firmware crkbd/rev1:aeby:uf2-split-left CONVERT_TO=elite_pi
+  make -C /qmk_firmware crkbd/rev1:aeby:uf2-split-left CONVERT_TO=elite_pi PROGRAM_CMD=true
 cp ~/workspace/qmk/crkbd_rev1_aeby_elite_pi.uf2 \
   /mnt/c/Users/heron/Downloads/crkbd_left.uf2
 
 # Right half
 docker run --rm -v ~/workspace/qmk:/qmk_firmware qmkfm/qmk_cli \
-  make -C /qmk_firmware crkbd/rev1:aeby:uf2-split-right CONVERT_TO=elite_pi
+  make -C /qmk_firmware crkbd/rev1:aeby:uf2-split-right CONVERT_TO=elite_pi PROGRAM_CMD=true
 cp ~/workspace/qmk/crkbd_rev1_aeby_elite_pi.uf2 \
   /mnt/c/Users/heron/Downloads/crkbd_right.uf2
 ```
@@ -117,7 +117,15 @@ cp ~/workspace/qmk/crkbd_rev1_aeby_elite_pi.uf2 \
 The left-OLED transit-map sim is included by default on this build — RP2040 flash is
 ample (`CONVERT_TO=elite_pi` makes `MCU=RP2040`, so `STARMAP_ENABLE` stays `yes`).
 
-The flash step inside Docker fails (no USB access) — that error is expected. Flash via Windows:
+**`PROGRAM_CMD=true` makes the build exit cleanly** instead of erroring on the flash
+step. The `uf2-split-left`/`-right` goals normally end by flashing — for the rp2040
+bootloader that shells out to `uf2conv.py --wait --deploy`, which crashes in headless
+Docker (no USB, no `USER` env). A non-empty `PROGRAM_CMD` replaces that final recipe
+line with a no-op (`true`); the `.uf2` is already built and copied to the repo root by
+then, so the artifact is **byte-identical** to a flashing run and the two halves still
+differ (handedness is baked in via the goal name, not the flash step). Drop the
+`PROGRAM_CMD=true` only if you are flashing from a host that can see the `RPI-RP2`
+drive. Flash via Windows:
 
 1. Double-tap reset on one half → `RPI-RP2` drive mounts in Explorer
 2. Copy `crkbd_left.uf2` or `crkbd_right.uf2` onto the drive

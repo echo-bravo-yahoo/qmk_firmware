@@ -30,6 +30,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define PERMISSIVE_HOLD
 #define QUICK_TAP_TERM 25
 
+#define OLED_TIMEOUT 0
+#define OLED_FONT_H "glcdfont_tomthumb.c"
+#define OLED_FONT_WIDTH 4
+#define OLED_FONT_START 0x20
+#define OLED_FONT_END 0x7E
+
+// Master→slave telemetry sync for the right-OLED mission readout.
+#define SPLIT_TRANSACTION_IDS_USER RPC_ID_USER_TELEMETRY
+
 #ifdef RGBLIGHT_ENABLE
     #define RGBLIGHT_EFFECT_BREATHING
     #define RGBLIGHT_EFFECT_RAINBOW_MOOD

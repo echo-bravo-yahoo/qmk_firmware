@@ -30,9 +30,11 @@ cp ~/workspace/qmk/ploopyco_madromys_rev1_001_aeby.uf2 \
 
 Then bootload the board and copy the UF2 to the RPI drive.
 
-## [Corne (white, busted)](./keyboards/crkbd)
+## [Corne (white PCB, busted)](./keyboards/crkbd)
 
-- Microcontroller: Elite-C x 2
+> Colors name the **PCB**, not the case. This is the white-PCB board (Elite-C / AVR).
+
+- Microcontroller: Elite-C x 2 (ATmega32U4)
 - Bootload: Plug in while holding reset
 
 ### Build workflow
@@ -45,6 +47,13 @@ docker run --rm -v ~/workspace/qmk:/qmk_firmware qmkfm/qmk_cli \
 ```
 
 HEX lands at `~/workspace/qmk/crkbd_rev1_aeby.hex`.
+
+The ATmega32U4's 32K flash can't hold the left-OLED transit-map sim, so it is
+**auto-excluded on this build**: `STARMAP_ENABLE` (keymap `rules.mk`) flips off when
+`MCU=atmega32u4` and no RP2040 converter is in play. The layers / homerow mods / RGB
+are unaffected — the OLEDs simply stay blank. The HEX above fits at ~69% flash.
+Override with `STARMAP_ENABLE=yes|no` on the command line (it won't link as `yes` on
+AVR). See `keyboards/crkbd/keymaps/aeby/rules.mk`.
 
 ### Flash workflow
 
@@ -72,13 +81,16 @@ Then flash each half from WSL. Run the script first, then bootload:
 
 The script writes the EE_HANDS EEPROM byte (handedness) in addition to the firmware.
 
-## [Corne (blue, new)](./keyboards/crkbd) — daily driver
+## [Corne (blue PCB, new)](./keyboards/crkbd) — daily driver
+
+> Colors name the **PCB**, not the case: this is a **blue PCB in a white case**.
 
 - Microcontroller: Elite-Pi × 2 (RP2040)
 - Keymap: `aeby` (homerow mods A/S/D/F = GUI/Alt/Ctrl/Shift, mirrored; 6 layers)
 - Left OLED: procedurally generated star-system transit map (Alien aesthetic) — the USCSS Patna
-  crawls a route to an `LV-NNN` moon in real time, then a new system generates on arrival. Right OLED:
-  data-driven mission telemetry (system name / LV destination / ETA), synced from the master half.
+  crawls a route to a survey-designated destination (e.g. `LV-426`) in real time, then a new system
+  generates on arrival. Right OLED: data-driven mission telemetry (system name / destination / ETA),
+  synced from the master half.
   Generator, world model, and preview/test tooling: `keyboards/crkbd/keymaps/aeby/preview/README.md`
 - Bootload: **double-tap the reset button** — the `RPI-RP2` USB drive appears in Windows
 - Flash: drag the matching UF2 onto the `RPI-RP2` drive, or use QMK Toolbox auto-flash
@@ -102,6 +114,9 @@ cp ~/workspace/qmk/crkbd_rev1_aeby_elite_pi.uf2 \
   /mnt/c/Users/heron/Downloads/crkbd_right.uf2
 ```
 
+The left-OLED transit-map sim is included by default on this build — RP2040 flash is
+ample (`CONVERT_TO=elite_pi` makes `MCU=RP2040`, so `STARMAP_ENABLE` stays `yes`).
+
 The flash step inside Docker fails (no USB access) — that error is expected. Flash via Windows:
 
 1. Double-tap reset on one half → `RPI-RP2` drive mounts in Explorer
@@ -114,21 +129,21 @@ The flash step inside Docker fails (no USB access) — that error is expected. F
 Visual reference: `keyboards/crkbd/keymaps/aeby/keymap.svg` (regenerate with
 `./scripts/draw-keymap.sh draw crkbd/rev1 aeby`).
 
-| Layer | Name    | Activated by              | Description |
-|-------|---------|---------------------------|-------------|
-| 0     | Default | (base)                    | QWERTY with homerow mods: A=GUI S=Alt D=Ctrl F=Shift, mirrored on right |
-| 1     | Symbols | hold SPC or BSPC          | Numbers 1–0, parens, brackets, `` ` = - ' \ `` |
-| 2     | Nav     | hold ESC or ENT           | Arrow keys (both hands), PgUp/PgDn/Home/End |
-| 3     | Media   | hold TAB or DEL           | F1–F12, one-shot mods, media controls, mouse buttons; right top-right key = `TG(4)` |
-| 4     | Gaming  | `TG(4)` from layer 3      | No homerow mods, standard QWERTY + explicit Shift/Ctrl/Alt; right top-right = `TO(0)`, right bottom-right = `TG(5)` |
-| 5     | G-Nav   | `TG(5)` from layer 4      | Arrow keys on WASD; overlays Gaming layer |
+| Layer | Name    | Activated by         | Description                                                                                                         |
+| ----- | ------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 0     | Default | (base)               | QWERTY with homerow mods: A=GUI S=Alt D=Ctrl F=Shift, mirrored on right                                             |
+| 1     | Symbols | hold SPC or BSPC     | Numbers 1–0, parens, brackets, `` ` = - ' \ ``                                                                      |
+| 2     | Nav     | hold ESC or ENT      | Arrow keys (both hands), PgUp/PgDn/Home/End                                                                         |
+| 3     | Media   | hold TAB or DEL      | F1–F12, one-shot mods, media controls, mouse buttons; right top-right key = `TG(4)`                                 |
+| 4     | Gaming  | `TG(4)` from layer 3 | No homerow mods, standard QWERTY + explicit Shift/Ctrl/Alt; right top-right = `TO(0)`, right bottom-right = `TG(5)` |
+| 5     | G-Nav   | `TG(5)` from layer 4 | Arrow keys on WASD; overlays Gaming layer                                                                           |
 
 Gaming (layer 4) is a **persistent toggle** — not a hold layer. `TG(4)` to enter, `TO(0)` to exit.
 On gaming layers the left OLED goes dark and the right swaps mission telemetry for a
 `GAMING / HRM DISABLD` readout.
 
 ## Ploopy trackball nano
-- Build: 
-- Bootload: 
-- Flash: 
 
+- Build:
+- Bootload:
+- Flash:

@@ -17,10 +17,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include QMK_KEYBOARD_H
-#include "transactions.h"   // split RPC (transaction_register_rpc / _rpc_send, RPC_ID_USER_*)
-#include "oled_gfx.h"
-#include "route_anim.h"
-#include <string.h>
+
+// The transit-map sim (left-OLED star map + right-OLED telemetry) is gated on
+// STARMAP_ENABLE (set in rules.mk; auto-off on the ATmega32U4, where it would
+// overflow flash). Its sources and these includes only come in when it is on.
+#if defined(OLED_ENABLE) && defined(STARMAP_ENABLE)
+#  include "transactions.h"   // split RPC (transaction_register_rpc / _rpc_send, RPC_ID_USER_*)
+#  include "oled_gfx.h"
+#  include "route_anim.h"
+#  include <string.h>
+#endif
 
 #define TAP_A LGUI_T(KC_A)
 #define TAP_S LALT_T(KC_S)
@@ -119,7 +125,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   )
 };
 
-#ifdef OLED_ENABLE
+#if defined(OLED_ENABLE) && defined(STARMAP_ENABLE)
 
 #define GAMING_LAYER 4
 
@@ -269,4 +275,4 @@ bool oled_task_user(void) {
     return false;
 }
 
-#endif // OLED_ENABLE
+#endif // OLED_ENABLE && STARMAP_ENABLE

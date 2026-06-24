@@ -177,6 +177,49 @@ void starmap_designation(uint32_t seed, const starmap_body_t *body, int idx,
     }
 }
 
+/* ── Destination spectral class (reflectance taxonomy) ────────────────────────
+ * Stars are classified by emission (OBAFGKM); these destinations are sub-stellar
+ * bodies, classified by *reflectance* spectra instead. The pools below are the
+ * real schemes that apply to each body type — the asteroid/KBO taxonomy (Tholen
+ * 1984; Bus-DeMeo 2009: C/S/X complexes + D/P/V/M/K end-members), the Sudarsky
+ * (2000) gas-giant classes I–V, and a lore-plausible silicate/metal extension for
+ * terrestrials (which have no canonical reflectance class, like the invented RF
+ * catalog). Trojan/vagrant pools are weighted D-heavy after the real Jupiter-
+ * trojan fractions (~80% D-type). Selection is a pure (seed,idx) hash — no RNG-
+ * stream draws — so it mirrors starmap_designation and stays host==device. */
+#define SW_SALT_CLASS 0x5C1A55E5u  /* decorrelate from designation / gas-giant salts */
+
+static const char *const SW_SUDARSKY[5] = { "I", "II", "III", "IV", "V" };
+
+void starmap_spectral_class(uint32_t seed, const starmap_body_t *body, int idx,
+                            char out[STARMAP_CLASS_LEN]) {
+    uint32_t h = sw_hash2(seed ^ SW_SALT_CLASS, idx);
+
+    /* Gas giants read the bare Sudarsky roman (I–V), ≤3 chars. */
+    if (body->type == STARMAP_PLANET && sw_is_gas_giant(seed, body, idx)) {
+        const char *roman = SW_SUDARSKY[h % 5u];
+        int n = 0;
+        while (roman[n] && n < STARMAP_CLASS_LEN - 1) { out[n] = roman[n]; n++; }
+        out[n] = '\0';
+        return;
+    }
+
+    /* Letter classes: a reflectance-taxonomy pool, weighted per body type, read as
+     * "<L><digit>" (2 chars). */
+    const char *pool;
+    switch (body->type) {
+        case STARMAP_MOON:    pool = "CDPS";        break; /* captured / icy small body  */
+        case STARMAP_TROJAN:  pool = "DDDDPPXCSV";  break; /* trojans ~80% D-type         */
+        case STARMAP_VAGRANT: pool = "DDDPPCXSV";   break; /* outer minor body, D-heavy   */
+        case STARMAP_PLANET:                               /* rocky world (invented ext.) */
+        default:              pool = "SQVMK";       break;
+    }
+    int len = sw_strlen(pool);
+    out[0] = pool[h % (uint32_t)len];
+    out[1] = (char)('0' + (h >> 8) % 10u);
+    out[2] = '\0';
+}
+
 /* ── System build (single source of truth) ───────────────────────────────────── */
 void starmap_build(const char *designation, starmap_system_t *out) {
     memset(out, 0, sizeof(*out));

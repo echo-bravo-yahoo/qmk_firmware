@@ -27,6 +27,7 @@
 #define STARMAP_MAX_PLANETS   6
 #define STARMAP_NAME_LEN     12  /* proper name, NUL-terminated   */
 #define STARMAP_DESIG_LEN     8  /* "LV-426" designation, NUL-terminated */
+#define STARMAP_CLASS_LEN     4  /* spectral class, e.g. "D4" / "III", NUL-terminated */
 
 /* Body kinds. */
 enum {
@@ -100,6 +101,21 @@ void starmap_build(const char *designation, starmap_system_t *out);
  * mirror stays stable). out must hold STARMAP_DESIG_LEN bytes. */
 void starmap_designation(uint32_t seed, const starmap_body_t *body, int idx,
                          char out[STARMAP_DESIG_LEN]);
+
+/* Destination spectral class — the banner's second line. Sub-stellar bodies are
+ * classified by *reflectance* spectra (not stellar OBAFGKM emission), so the class
+ * set per body type comes from the real reflectance taxonomies:
+ *   moon            → {C,D,P,S}      asteroid/KBO reflectance pool (captured/icy)
+ *   gas-giant plan. → Sudarsky I–V   (roman; temperature/cloud chemistry)
+ *   rocky planet    → {S,Q,V,M,K}    silicate/metal end (lore-plausible extension)
+ *   trojan          → D-heavy pool   (Jupiter trojans are ~80% D-type)
+ *   vagrant         → D-heavy pool   (outer minor body)
+ * Format mimics the stellar "G2V" shape, ≤3 chars: letter classes read "<L><digit>"
+ * (e.g. "D4"); gas giants read the bare roman ("III"). Pure seed-hash like
+ * starmap_designation — no RNG-stream draws, so topology/ETA rolls and host==device
+ * are untouched. out must hold STARMAP_CLASS_LEN bytes. */
+void starmap_spectral_class(uint32_t seed, const starmap_body_t *body, int idx,
+                            char out[STARMAP_CLASS_LEN]);
 
 /* World position of a body (recursively adds the parent's position). */
 void starmap_world_pos(const starmap_system_t *sys, int idx, float *x, float *y);

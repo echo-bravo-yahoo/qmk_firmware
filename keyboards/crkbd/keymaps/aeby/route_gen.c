@@ -22,6 +22,13 @@
 #define RG_MARGIN_X  12
 #define RG_MARGIN_Y  5
 
+/* Space-filling banner: after best-fit framing, the leftover x beyond the route's
+ * rendered extent is the banner budget. A strip that clears the floor is reserved
+ * at the destination side and the route is shifted away from it. Gutter is the
+ * clear gap between the route and the strip. First-pass values — tune vs. previews. */
+#define RG_BANNER_GUTTER 3   /* clear px between route extent and banner strip */
+#define RG_BANNER_MIN_W  12  /* below this strip width → no banner (center as before) */
+
 /* Framing sweep: choose the rotation that best fits the visited path into the wide
  * panel rather than always aligning dep→dest with +x. */
 #define RG_FRAME_STEPS 120     /* candidate angles over [0,π); 1.5° resolution */
@@ -372,6 +379,76 @@ static float rg_leg_len(const gfx_leg_t *l) {
     return len;
 }
 
+/* ── Banner: measure content extent, then shift the route away from the strip ───
+ * The content x-extent [x0,x1] is measured the way the renderer lights it — min/max
+ * over each ring's horizontal reach (center ± radius), each leg's drawn path, and
+ * every marker / decoration body with its pixel half-width. Deterministic and host-
+ * testable (no rasterize-then-scan), matching the leftmost→rightmost lit pixel.
+ *
+ * The extent is *true*, not clamped to the panel: a decoration ring that runs off
+ * the right edge is clipped today, but the left-justifying shift below would slide
+ * that clipped part back on-screen into the banner strip. Counting the off-panel
+ * reach inflates w_img and suppresses the banner in exactly those cases, so once a
+ * banner is placed nothing the shift reveals can collide with it. */
+static void rg_content_xspan(const gfx_route_t *out, int16_t *x0, int16_t *x1) {
+    float lo = 1e9f, hi = -1e9f;
+    #define RG_ACC(v) do { float _v = (float)(v); if (_v < lo) lo = _v; if (_v > hi) hi = _v; } while (0)
+
+    for (int i = 0; i < out->arc_count; i++) {
+        int16_t c = out->arcs[i].local_center ? out->arcs[i].cx : out->arc_cx;
+        RG_ACC(c - out->arcs[i].radius);
+        RG_ACC(c + out->arcs[i].radius);
+    }
+    for (int i = 0; i < out->leg_count; i++) {
+        const gfx_leg_t *l = &out->legs[i];
+        for (int k = 0; k <= 8; k++) {
+            float s = (float)k / 8.0f, lx;
+            if (l->type == GFX_LEG_COAST) {
+                lx = (float)l->cx + (float)l->arc_r * cosf(l->a0 + l->a_sweep * s);
+            } else {
+                int16_t bx, by;
+                gfx_prim_bezier_point(l->p0x, l->p0y, l->cx, l->cy, l->p1x, l->p1y, s, &bx, &by);
+                lx = (float)bx;
+            }
+            RG_ACC(lx);
+        }
+    }
+    for (int i = 0; i < out->marker_count; i++) {   /* reticle/ring/cross ±3, body ±1 */
+        int16_t hw = (out->markers[i].type == GFX_MARKER_BODY) ? 1 : 3;
+        RG_ACC(out->markers[i].x - hw);
+        RG_ACC(out->markers[i].x + hw);
+    }
+    for (int i = 0; i < out->body_count; i++) {
+        RG_ACC(out->bodies[i].x - 1);
+        RG_ACC(out->bodies[i].x + 1);
+    }
+    #undef RG_ACC
+
+    *x0 = (int16_t)floorf(lo);   /* round outward so the banner fully clears */
+    *x1 = (int16_t)ceilf(hi);
+}
+
+/* Translate every packed x by dx — equivalent to injecting the offset into both
+ * centering sites (rg_to_disp + arc_cx), but applied post-pack so the measurement
+ * above can run first. Integer dx, so it commutes with the lroundf already done.
+ * Coast angles (a0/a_sweep) are center-relative, so shifting center + endpoints
+ * together leaves them valid. */
+static void rg_shift_route_x(gfx_route_t *out, int16_t dx) {
+    if (dx == 0) return;
+    out->arc_cx = (int16_t)(out->arc_cx + dx);
+    for (int i = 0; i < out->arc_count; i++)
+        if (out->arcs[i].local_center) out->arcs[i].cx = (int16_t)(out->arcs[i].cx + dx);
+    for (int i = 0; i < out->leg_count; i++) {
+        out->legs[i].p0x = (int16_t)(out->legs[i].p0x + dx);
+        out->legs[i].p1x = (int16_t)(out->legs[i].p1x + dx);
+        out->legs[i].cx  = (int16_t)(out->legs[i].cx + dx);
+    }
+    for (int i = 0; i < out->marker_count; i++)
+        out->markers[i].x = (int16_t)(out->markers[i].x + dx);
+    for (int i = 0; i < out->body_count; i++)
+        out->bodies[i].x = (int16_t)(out->bodies[i].x + dx);
+}
+
 /* ── Stage 4: pack gfx_route_t ──────────────────────────────────────────────── */
 void route_gen_build(const char *designation, gfx_route_t *out) {
     memset(out, 0, sizeof(*out));
@@ -483,6 +560,25 @@ void route_gen_build(const char *designation, gfx_route_t *out) {
         float bx, by;
         starmap_world_pos(sys, i, &bx, &by);
         rg_add_body(out, &pl, bx, by);
+    }
+
+    /* Destination spectral class (always — telemetry/banner second line) plus the
+     * space-filling banner when the framing left a wide enough x-gap. */
+    starmap_spectral_class(sys->seed, &sys->bodies[sys->dest_idx], sys->dest_idx,
+                           out->dest_class);
+    out->banner_x = 0;
+    out->banner_w = 0;
+    {
+        int16_t x0, x1;
+        rg_content_xspan(out, &x0, &x1);
+        int16_t w_img    = (int16_t)(x1 - x0);
+        int16_t leftover = (int16_t)((128 - 2 * RG_MARGIN_X) - w_img);
+        int16_t w_ban    = (int16_t)(leftover - RG_BANNER_GUTTER);
+        if (w_ban >= RG_BANNER_MIN_W) {
+            rg_shift_route_x(out, (int16_t)(RG_MARGIN_X - x0));   /* left-justify route */
+            out->banner_x = (uint8_t)(RG_MARGIN_X + w_img + RG_BANNER_GUTTER);
+            out->banner_w = (uint8_t)w_ban;
+        }
     }
 }
 

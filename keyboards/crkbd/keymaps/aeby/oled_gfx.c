@@ -193,12 +193,155 @@ void gfx_prim_crosshair(int16_t x, int16_t y, uint8_t size) {
     gfx_prim_pixel(x, y, true);
 }
 
+/* ── Tom Thumb text (shared glyph table; see glcdfont_tomthumb.c) ──────────────
+ * 4 bytes/glyph from 0x20: [col0, col1, col2, pad]; bit b of a column = row b
+ * (bit0 = top). 3 cols wide, 5 rows tall, 4px advance, 6px line. */
+extern const uint8_t *gfx_tomthumb_font(void);
+
+#define GFX_TT_FIRST  0x20
+#define GFX_TT_LAST   0x7E
+#define GFX_TT_COLS   3
+#define GFX_TT_ROWS   5
+#define GFX_TT_ADV    4   /* per-char step (3 cols + 1 spacing) */
+
+void gfx_prim_text(int16_t x, int16_t y, const char *s, uint8_t scale) {
+    if (scale < 1) scale = 1;
+    const uint8_t *font = gfx_tomthumb_font();
+    for (int i = 0; s[i]; i++) {
+        uint8_t c = (uint8_t)s[i];
+        if (c < GFX_TT_FIRST || c > GFX_TT_LAST) continue;
+        const uint8_t *g = &font[(uint16_t)(c - GFX_TT_FIRST) * 4u];
+        int16_t cx = (int16_t)(x + i * GFX_TT_ADV * scale);
+        for (int col = 0; col < GFX_TT_COLS; col++) {
+            uint8_t bits = g[col];
+            for (int row = 0; row < GFX_TT_ROWS; row++) {
+                if (!((bits >> row) & 1u)) continue;
+                for (int sy = 0; sy < scale; sy++)
+                    for (int sx = 0; sx < scale; sx++)
+                        gfx_prim_pixel((int16_t)(cx + col * scale + sx),
+                                       (int16_t)(y  + row * scale + sy), true);
+            }
+        }
+    }
+}
+
+/* Rotated 90° CCW so the column reads bottom→top, anchored at bottom-left
+ * (x, y_bottom): glyph rows run along +x (≈5·scale wide), glyph cols + advance run
+ * upward, successive chars stack upward. */
+void gfx_prim_text_vertical(int16_t x, int16_t y_bottom, const char *s, uint8_t scale) {
+    if (scale < 1) scale = 1;
+    const uint8_t *font = gfx_tomthumb_font();
+    for (int i = 0; s[i]; i++) {
+        uint8_t c = (uint8_t)s[i];
+        if (c < GFX_TT_FIRST || c > GFX_TT_LAST) continue;
+        const uint8_t *g = &font[(uint16_t)(c - GFX_TT_FIRST) * 4u];
+        int16_t cbase = (int16_t)(y_bottom - i * GFX_TT_ADV * scale);
+        for (int col = 0; col < GFX_TT_COLS; col++) {
+            uint8_t bits = g[col];
+            for (int row = 0; row < GFX_TT_ROWS; row++) {
+                if (!((bits >> row) & 1u)) continue;
+                for (int sy = 0; sy < scale; sy++)
+                    for (int sx = 0; sx < scale; sx++)
+                        gfx_prim_pixel((int16_t)(x     + row * scale + sx),
+                                       (int16_t)(cbase - col * scale - sy), true);
+            }
+        }
+    }
+}
+
 uint8_t gfx_pulse_size(uint32_t now_ms) {
     /* ~1 Hz triangle between 2 and 4 px, independent of the (hours-long)
      * journey clock so the 20 Hz panel stays visibly alive. */
     uint32_t phase = now_ms % 1000u;
     uint32_t tri   = (phase < 500u) ? phase : (1000u - phase); /* 0..500 */
     return (uint8_t)(2u + (tri * 2u) / 500u);                  /* 2, 3, 4 */
+}
+
+/* ── Space-filling banner ─────────────────────────────────────────────────────
+ * route_gen reserves a strip [banner_x, banner_x+banner_w) on compact routes; this
+ * fills it with the destination designation + spectral class. The tier (and so the
+ * treatment) is chosen by the strip width — a slim vertical label uses the tall
+ * axis, a wider strip a horizontal CRT-readout, the widest a framed 2× placard. */
+#define GFX_BANNER_VERT_MAX   29   /* ≤ this → vertical rotated label              */
+#define GFX_BANNER_HORIZ_MAX  55   /* ≤ this → horizontal 2-line readout           */
+#define GFX_BANNER_VERT_2COL  24   /* vertical: add a class column at/above this w  */
+
+/* Rendered width / height (px) of a Tom Thumb string at scale (trailing advance
+ * gap dropped). Horizontal text is gfx_text_w wide × 5·scale tall; a vertical
+ * column is 5·scale wide × gfx_text_h tall. */
+static int16_t gfx_text_w(const char *s, uint8_t scale) {
+    int n = 0; while (s[n]) n++;
+    return n ? (int16_t)((n * GFX_TT_ADV - 1) * scale) : 0;
+}
+static int16_t gfx_text_h(const char *s, uint8_t scale) {
+    return gfx_text_w(s, scale);   /* same cell count down the rotated axis */
+}
+
+/* Wrap s in [ ] brackets if the bracketed form fits avail px (scale 1); else copy
+ * s verbatim. dst must hold at least strlen(s)+3. */
+static void gfx_bracket_fit(char *dst, const char *s, int16_t avail) {
+    int n = 0; while (s[n]) n++;
+    int16_t braced = (int16_t)((n + 2) * GFX_TT_ADV - 1);
+    int i = 0;
+    if (braced <= avail) {
+        dst[0] = '[';
+        for (; s[i]; i++) dst[1 + i] = s[i];
+        dst[1 + i] = ']'; dst[2 + i] = '\0';
+    } else {
+        for (; s[i]; i++) dst[i] = s[i];
+        dst[i] = '\0';
+    }
+}
+
+static void gfx_route_draw_banner(const gfx_route_t *route) {
+    int16_t bx = (int16_t)route->banner_x;
+    int16_t bw = (int16_t)route->banner_w;
+    if (bw <= 0) return;
+    const char *desig = route->designation;
+    const char *cls   = route->dest_class;
+
+    if (bw <= GFX_BANNER_VERT_MAX) {
+        /* Slim vertical label reading bottom→top down the tall axis. */
+        bool two_col = (bw >= GFX_BANNER_VERT_2COL) && cls[0];
+        int16_t col_w = (int16_t)(GFX_TT_ROWS);      /* 5 px at scale 1 */
+        int16_t gap   = 2;
+        int16_t total = two_col ? (int16_t)(col_w + gap + col_w) : col_w;
+        int16_t x0 = (int16_t)(bx + (bw - total) / 2);
+        int16_t dh = gfx_text_h(desig, 1);
+        gfx_prim_text_vertical(x0, (int16_t)((32 + dh) / 2), desig, 1);
+        if (two_col) {
+            int16_t ch = gfx_text_h(cls, 1);
+            gfx_prim_text_vertical((int16_t)(x0 + col_w + gap),
+                                   (int16_t)((32 + ch) / 2), cls, 1);
+        }
+    } else if (bw <= GFX_BANNER_HORIZ_MAX) {
+        /* Horizontal 2-line readout, bracketed for a CRT feel: designation / class. */
+        char l1[12], l2[8];
+        gfx_bracket_fit(l1, desig, bw);
+        gfx_bracket_fit(l2, cls,   bw);
+        int16_t line_h = GFX_TT_ROWS, vgap = 3;
+        int16_t top = (int16_t)((32 - (2 * line_h + vgap)) / 2);
+        gfx_prim_text((int16_t)(bx + (bw - gfx_text_w(l1, 1)) / 2), top, l1, 1);
+        gfx_prim_text((int16_t)(bx + (bw - gfx_text_w(l2, 1)) / 2),
+                      (int16_t)(top + line_h + vgap), l2, 1);
+    } else {
+        /* Big framed placard: designation 2× over a 1× spectral-class subline. */
+        for (int16_t x = bx; x < bx + bw; x++) {        /* thin frame */
+            gfx_prim_pixel(x, 0, true);
+            gfx_prim_pixel(x, 31, true);
+        }
+        for (int16_t y = 0; y < 32; y++) {
+            gfx_prim_pixel(bx, y, true);
+            gfx_prim_pixel((int16_t)(bx + bw - 1), y, true);
+        }
+        uint8_t dscale = (gfx_text_w(desig, 2) <= bw - 4) ? 2 : 1;
+        int16_t dw = gfx_text_w(desig, dscale);
+        gfx_prim_text((int16_t)(bx + (bw - dw) / 2), 6, desig, dscale);
+        if (cls[0]) {
+            int16_t cw = gfx_text_w(cls, 1);
+            gfx_prim_text((int16_t)(bx + (bw - cw) / 2), 22, cls, 1);
+        }
+    }
 }
 
 /* ── Route rendering ────────────────────────────────────────────────────────── */
@@ -237,6 +380,8 @@ void gfx_route_draw_bg(const gfx_route_t *route) {
     for (uint8_t i = 0; i < route->body_count; i++) {
         gfx_prim_body(route->bodies[i].x, route->bodies[i].y);
     }
+
+    if (route->banner_w) gfx_route_draw_banner(route);
 }
 
 void gfx_route_bake_bg(const gfx_route_t *route, uint8_t buf[512]) {

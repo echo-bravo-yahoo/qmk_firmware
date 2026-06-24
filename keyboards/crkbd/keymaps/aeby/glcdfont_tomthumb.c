@@ -1,7 +1,20 @@
 // Tom Thumb 3x5 font for QMK OLED, reformatted for 4-byte-per-glyph storage.
 // OLED_FONT_WIDTH 4, OLED_FONT_START 0x20, OLED_FONT_END 0x7E
 // Each char: [col0, col1, col2, 0x00]. Bit 0 = topmost pixel of each column.
-#include "progmem.h"
+//
+// This file is #included by the QMK OLED driver via OLED_FONT_H (which needs the
+// `font` array — and sizeof(font), so it must stay a real array, not a pointer).
+// The transit-map banner reuses the same glyphs through gfx_tomthumb_font() below,
+// so the table is authored once. The host preview compiles this TU standalone
+// (PROGMEM is a no-op off-target — the guard supplies it when progmem.h is absent).
+#if defined(__has_include)
+#  if __has_include("progmem.h")
+#    include "progmem.h"
+#  endif
+#endif
+#ifndef PROGMEM
+#  define PROGMEM
+#endif
 
 static const unsigned char PROGMEM font[] = {
     0x00, 0x00, 0x00, 0x00, // ' '
@@ -100,3 +113,11 @@ static const unsigned char PROGMEM font[] = {
     0x11, 0x1B, 0x04, 0x00, // '}'
     0x02, 0x04, 0x0C, 0x00, // '~'
 };
+
+/* Thin accessor so oled_gfx's banner can read the same glyph table without a
+ * second copy. Returns the column-major base (4 bytes/glyph from 0x20); the RP2040
+ * target maps flash directly, so plain indexing reads the PROGMEM bytes. */
+#include <stdint.h>
+const uint8_t *gfx_tomthumb_font(void) {
+    return (const uint8_t *)font;
+}

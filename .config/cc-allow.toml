@@ -2,14 +2,26 @@ version = "2.0"
 
 [bash.allow]
 commands = [
+  "gcc",
+  "cc",
   "keymap",
   "qmk",
+  "python3",
   "path:$PROJECT_ROOT/scripts/**",
+  "path:$PROJECT_ROOT/echobravoyahoo/**",
 ]
 
 # Allow docker run for QMK compilation (scoped to qmkfm image + --rm)
 [[bash.allow.docker.run]]
 args.all = ["--rm", "re:^qmkfm[/]"]
+
+# Allow the host preview/test runner: `uv run --with pytest --with pillow pytest …`
+# Scoped so both the suite's deps appear — this pins the run target to pytest and
+# the --with set to pytest+pillow, so it can't run an arbitrary uv target or pull
+# in other PyPI packages. (python3 is already allowed above, so running pytest is
+# no broader than what this repo already trusts.)
+[[bash.allow.uv.run]]
+args.all = ["pytest", "pillow"]
 
 # Allow cmd.exe for Windows username lookup (used to build the Downloads path)
 [[bash.allow."cmd.exe"]]

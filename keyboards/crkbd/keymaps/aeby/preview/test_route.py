@@ -66,30 +66,62 @@ def test_name_fits_and_printable():
         assert all(32 <= ord(c) <= 126 for c in name), f"{d}: non-printable name {name!r}"
 
 
-# ── Designation reflects the destination body's class ─────────────────────────
+# ── Designation is a property-derived class label ─────────────────────────────
+#
+# LV = life-viable world (moon OR rocky planet in the habitable band); KG = gas
+# giant; BG = rocky but not life-viable; RF = minor body (trojan/vagrant). The
+# life-viability predicate is internal to the C (like gas-giant-ness) — these are
+# property-aware invariants over the public (dest type, designation) pair, not a
+# type→prefix table.
 
-# Prefix → which body classes may legitimately carry it.
-_CLASS_PREFIX = {
-    g.STARMAP_MOON:    {"LV"},
-    g.STARMAP_PLANET:  {"KG", "BG"},   # gas giant vs colony world (derived in C)
-    g.STARMAP_TROJAN:  {"RF"},
+# Prefix sets each destination body type may legitimately carry.
+_TYPE_PREFIXES = {
+    g.STARMAP_MOON:    {"LV", "BG"},        # viable moon vs barren moon
+    g.STARMAP_PLANET:  {"LV", "BG", "KG"},  # viable / barren rocky / gas giant
+    g.STARMAP_TROJAN:  {"RF"},              # minor body — never LV
     g.STARMAP_VAGRANT: {"RF"},
 }
 
+# Wide sweep so all four prefixes appear (LV needs an in-band, viable destination).
+# Widen this range if a prefix goes missing after tuning the habitable band.
+DESIG_DESIGS = [f"LV-{n}" for n in range(100, 1100)]
 
-def test_designation_matches_body_class():
-    seen = set()
-    for d in DESIGS:
+
+def test_designation_property_invariants():
+    seen_prefix = set()
+    for d in DESIG_DESIGS:
         s = g.build_system(d)
         desig = g.generate_route(d)['designation']
         prefix = desig.split("-")[0]
-        seen.add(prefix)
+        seen_prefix.add(prefix)
         body_type = s.bodies[s.dest_idx].type
-        assert prefix in _CLASS_PREFIX[body_type], \
-            f"{d}: dest class {body_type} got designation {desig!r}"
+        # Per-type prefix set holds.
+        assert prefix in _TYPE_PREFIXES[body_type], \
+            f"{d}: dest type {body_type} got designation {desig!r}"
+        # LV excludes minor bodies: a trojan/vagrant is always RF, never LV.
+        if body_type in (g.STARMAP_TROJAN, g.STARMAP_VAGRANT):
+            assert prefix == "RF", f"{d}: minor body {body_type} got {desig!r}"
+        # LV is a major rocky body: only a moon or a planet may carry it.
+        if prefix == "LV":
+            assert body_type in (g.STARMAP_MOON, g.STARMAP_PLANET), \
+                f"{d}: LV on non-major body type {body_type}"
         assert len(desig) <= 7, f"{d}: designation {desig!r} too long for OLED column"
-    # The class designation actually varies across a sweep (not all one prefix).
-    assert {"LV", "KG", "BG"} <= seen, f"prefixes don't vary as expected: {seen}"
+    # All four prefixes are exercised across the sweep.
+    assert {"LV", "KG", "BG", "RF"} <= seen_prefix, \
+        f"not all prefixes appeared across the sweep: {seen_prefix}"
+
+
+def test_lv_spans_moons_and_planets():
+    """LV is a habitability class orthogonal to orbital role, so it must land on
+    both moons and rocky planets across the sweep — not just one (canon: LV-426 is
+    a moon, LV-178/895 are planets)."""
+    lv_types = set()
+    for d in DESIG_DESIGS:
+        s = g.build_system(d)
+        if g.generate_route(d)['designation'].split("-")[0] == "LV":
+            lv_types.add(s.bodies[s.dest_idx].type)
+    assert g.STARMAP_MOON in lv_types, "no LV moon across the sweep"
+    assert g.STARMAP_PLANET in lv_types, "no LV rocky planet across the sweep"
 
 
 def test_designation_deterministic():

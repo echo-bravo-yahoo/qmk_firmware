@@ -112,11 +112,15 @@ static void sw_make_name(starmap_rng_t *rng, char *out) {
     }
 }
 
-/* ── Survey designation (derived from the destination body's class) ───────────
- * The displayed designation is no longer the seed token; it is a class label of
- * the chosen destination, grounded in canon (LV = Life Viable moons; KG = Jovian
- * gas giants, per KG-348; BG = colony worlds, per BG-386) plus an invented
- * minor-body catalog (RF) for trojans/vagrants. */
+/* ── Survey designation (derived from the destination body's properties) ───────
+ * The displayed designation is no longer the seed token; it is a class label
+ * derived from the destination's intrinsic properties — orbital role, composition
+ * and a derived life-viability — never stored on starmap_body_t (so the ctypes
+ * mirror stays stable). Grounded in canon: LV = Life-Viable world (moon OR rocky
+ * planet in the habitable band — LV-426 is a moon, LV-178/895 are planets);
+ * KG = Jovian gas giant, per KG-348; BG = rocky world that is not life-viable
+ * (barren / colony), per BG-386; plus an invented minor-body catalog (RF) for
+ * trojans/vagrants. See world-classification.md for the full rationale. */
 
 /* Finalmix hash of (seed, idx) → a well-distributed 32-bit value. */
 static uint32_t sw_hash2(uint32_t seed, int idx) {
@@ -140,6 +144,32 @@ static bool sw_is_gas_giant(uint32_t seed, const starmap_body_t *body, int idx) 
     return (sw_hash2(seed ^ 0x5BD1E995u, idx) & 1u) != 0;
 }
 
+/* Life-viability for the LV designation: a major rocky body (moon or planet) in
+ * the temperate habitable band. Derived (not stored) — mirrors sw_is_gas_giant,
+ * so no starmap_body_t field is added and the ctypes mirror stays stable. Pure
+ * (seed,idx) hash, no RNG-stream draws, so topology/ETA rolls and host==device
+ * are untouched. A moon inherits its parent planet's heliocentric distance, so a
+ * habitable moon of a band gas giant reads LV — the LV-426/Calpamos shape.
+ *
+ * Habitable band (wu): the temperate annulus where a rocky world can be life-
+ * viable. Tunable; first-pass excludes scorching-inner and frozen/gas-giant-outer
+ * orbits. Planets generate at ~30–120 wu; gas giants skew ≥85; this band sits in
+ * the middle. */
+#define SW_HZ_MIN      34.0f
+#define SW_HZ_MAX      82.0f
+#define SW_SALT_VIABLE 0x1FE57AB1u   /* decorrelate from designation / gas-giant / class salts */
+
+static bool sw_is_life_viable(uint32_t seed, const starmap_system_t *sys, int idx) {
+    const starmap_body_t *b = &sys->bodies[idx];
+    if (b->type == STARMAP_TROJAN || b->type == STARMAP_VAGRANT) return false; /* minor body */
+    if (sw_is_gas_giant(seed, b, idx)) return false;                            /* no surface */
+    float r = (b->type == STARMAP_MOON)
+              ? sys->bodies[b->parent_idx].orbital_radius   /* moon ≈ its planet's heliocentric distance */
+              : b->orbital_radius;
+    if (r < SW_HZ_MIN || r > SW_HZ_MAX) return false;       /* must be in the temperate band */
+    return (sw_hash2(seed ^ SW_SALT_VIABLE, idx) & 1u) != 0;/* roll so in-zone worlds vary → some BG */
+}
+
 /* "PP-N…" — two-letter prefix, dash, serial with no leading zeros. The longest
  * form ("RF-9999") is 7 chars, fitting designation[8] and the 8-col OLED. */
 static void sw_format_designation(char *out, const char *prefix, uint32_t serial) {
@@ -158,23 +188,19 @@ static void sw_format_designation(char *out, const char *prefix, uint32_t serial
     out[n] = '\0';
 }
 
-void starmap_designation(uint32_t seed, const starmap_body_t *body, int idx,
+void starmap_designation(uint32_t seed, const starmap_system_t *sys, int idx,
                          char out[STARMAP_DESIG_LEN]) {
+    const starmap_body_t *b = &sys->bodies[idx];
     uint32_t h = sw_hash2(seed, idx);
-    switch (body->type) {
-        case STARMAP_MOON:
-            sw_format_designation(out, "LV", 100u + (h % 1200u));   /* 100–1299 */
-            break;
-        case STARMAP_PLANET:
-            sw_format_designation(out, sw_is_gas_giant(seed, body, idx) ? "KG" : "BG",
-                                  100u + (h % 900u));                /* 100–999  */
-            break;
-        case STARMAP_TROJAN:
-        case STARMAP_VAGRANT:
-        default:
-            sw_format_designation(out, "RF", 1000u + (h % 9000u));  /* 1000–9999 */
-            break;
-    }
+    /* Decision order: minor body → gas giant → life-viable → else rocky-non-viable. */
+    if (b->type == STARMAP_TROJAN || b->type == STARMAP_VAGRANT)
+        sw_format_designation(out, "RF", 1000u + (h % 9000u));   /* minor body   1000–9999 */
+    else if (sw_is_gas_giant(seed, b, idx))
+        sw_format_designation(out, "KG", 100u + (h % 900u));     /* gas giant     100–999  */
+    else if (sw_is_life_viable(seed, sys, idx))
+        sw_format_designation(out, "LV", 100u + (h % 1200u));    /* life-viable   100–1299 */
+    else
+        sw_format_designation(out, "BG", 100u + (h % 900u));     /* rocky, barren/colony   */
 }
 
 /* ── Destination spectral class (reflectance taxonomy) ────────────────────────
@@ -302,8 +328,8 @@ void starmap_build(const char *designation, starmap_system_t *out) {
     if (dst >= out->depart_idx) dst++;   /* keep it distinct from departure */
     out->dest_idx = (uint8_t)dst;
 
-    /* Designation is a derived label of the destination body's class, not the
-     * seed token — see starmap_designation. */
-    starmap_designation(out->seed, &out->bodies[out->dest_idx], out->dest_idx,
-                        out->designation);
+    /* Designation is a derived label of the destination body's properties, not the
+     * seed token — see starmap_designation. Pass the system so a moon's life-
+     * viability can read its parent planet's heliocentric distance. */
+    starmap_designation(out->seed, out, out->dest_idx, out->designation);
 }

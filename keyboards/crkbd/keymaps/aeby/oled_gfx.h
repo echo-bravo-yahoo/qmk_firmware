@@ -70,6 +70,13 @@ typedef struct {
 
     char         system_name[12];   /* proper system name, e.g. "CALPAMOS"   */
     char         designation[8];    /* destination, e.g. "LV-426"            */
+
+    /* Space-filling banner: when best-fit framing leaves a wide x-gap on a compact
+     * route, a placard (designation + spectral class) fills it. Appended last so
+     * the ctypes bridge stays stable (gfx_route_sizeof asserts parity). */
+    char         dest_class[4];     /* destination spectral class, e.g. "D4" / "III" */
+    uint8_t      banner_x;          /* banner strip left x (0 ⇒ no banner)            */
+    uint8_t      banner_w;          /* banner strip width  (0 ⇒ no banner)            */
 } gfx_route_t;
 
 /* ── Primitives ─────────────────────────────────────────────────────────────── */
@@ -88,6 +95,14 @@ void gfx_prim_body(int16_t x, int16_t y);
 void gfx_prim_reticle(int16_t x, int16_t y);
 /* size = outer arm offset (px); the crosshair pulses by varying it per frame. */
 void gfx_prim_crosshair(int16_t x, int16_t y, uint8_t size);
+
+/* Tom Thumb (3×5, 4px advance, 6px line) text into the current render target.
+ * gfx_prim_text draws left→right from the top-left (x,y); gfx_prim_text_vertical
+ * draws a 90°-rotated column reading bottom→top, anchored at bottom-left
+ * (x, y_bottom). scale ≥ 1 multiplies every cell. Glyph bytes come from the shared
+ * Tom Thumb table (gfx_tomthumb_font), not a duplicate. */
+void gfx_prim_text(int16_t x, int16_t y, const char *s, uint8_t scale);
+void gfx_prim_text_vertical(int16_t x, int16_t y_bottom, const char *s, uint8_t scale);
 
 /* ── Route rendering ────────────────────────────────────────────────────────── */
 void gfx_route_draw_bg(const gfx_route_t *route);

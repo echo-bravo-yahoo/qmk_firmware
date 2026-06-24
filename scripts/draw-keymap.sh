@@ -31,7 +31,7 @@ layer_names_for() {
       printf '%s\n' Base "Numbers & Symbols" Navigation "Function & Media" Gaming "Gaming Arrows"
       ;;
     ploopyco/madromys/aeby)
-      printf '%s\n' Base
+      printf '%s\n' Base Fn Gaming
       ;;
     tarohayashi/killerwhale/duo/default)
       printf '%s\n' Base "On/Off" "Off/On" "On/On" Mouse "Ball Settings" "Light Settings"
@@ -41,6 +41,28 @@ layer_names_for() {
       ;;
     tarohayashi/killerwhale/solo/default | tarohayashi/killerwhale/solo/aeby)
       printf '%s\n' "Left Base" "Right Base" Mouse "Ball Settings" "Light Settings"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Combo annotations for the keymap, appended to the parsed YAML after bootstrap.
+# keymap-drawer reads combos from the keymap YAML's top-level `combos:` block, and
+# qmk c2json does NOT emit combos (they're C arrays in keymap.c, not in the JSON),
+# so they can't ride along the parse and there is no config-level equivalent —
+# hence this per-keymap table, reapplied on every bootstrap. Emits a `combos:`
+# YAML block (or nothing + return 1 if the keymap has no combos to annotate).
+combos_for() {
+  case "$1/$2" in
+    ploopyco/madromys/aeby)
+      # top-outer-left (pos 0) + top-inner-right (pos 2) => TG(_GAME), shown on
+      # the layers where that physical chord is live (Base entry, Gaming exit).
+      cat <<'YAML'
+combos:
+  - {p: [0, 2], k: "⇄ Game", l: ["Base", "Gaming"]}
+YAML
       ;;
     *)
       return 1
@@ -128,6 +150,8 @@ case "$cmd" in
     qmk c2json -kb "$kb" -km "$km" -o "$tmp_json" "$src" >/dev/null 2>&1 \
       || qmk c2json -kb "$kb" -km "$km" --no-cpp -o "$tmp_json" "$src" >/dev/null
     keymap -c "$config" parse -q "$tmp_json" --layer-names "${layer_names[@]}" > "$yaml"
+    # Append per-keymap combo annotations (no-op for keymaps without any).
+    combos_for "$kb" "$km" >> "$yaml" || true
     echo "wrote $yaml"
     ;;
   draw)

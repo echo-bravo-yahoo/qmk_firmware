@@ -17,7 +17,9 @@ parse_config:
   # us render keycodes that reference layers absent from the C source (OSL(1)
   # in ploopyco/madromys/aeby points at a layer commented out in keymap.c).
   raw_binding_map:
-    "OSL(1)": {t: OSL, h: "1"}
+    # madromys/aeby keymap.c writes OSL(_FN); qmk c2json keeps the enum symbol
+    # verbatim (no preprocessing of the layer index), so match _FN not 1.
+    "OSL(_FN)": {t: "Fn", h: "1-shot"}
     # Home-row mod-tap legends. modifier_fn_map only fires for modifier-function
     # keycodes (LCTL(...) etc.) — mod-tap holds keep the bare shortname unless
     # remapped here.
@@ -97,7 +99,20 @@ parse_config:
     BTN1: L click
     BTN2: R click
     BTN3: M click
+    MS_BTN1: L click
+    MS_BTN2: R click
+    MS_BTN3: M click
     DRAG_SCROLL: Drag scroll
+
+    # ploopyco/madromys aeby gaming keymap: F13–F15 (universally bindable) and
+    # the four discrete "set DPI to X" custom keycodes on the Fn layer.
+    F13: F13
+    F14: F14
+    F15: F15
+    DPI_MIN: "400 min"
+    DPI_LOMID: "1200"
+    DPI_HIMID: "1600"
+    DPI_MAX: "2400 max"
     MPLY: ⏯
     MPRV: ⏮
     MNXT: ⏭

@@ -36,7 +36,7 @@ layers:
     - "Tactical"   # F  — Tactical Ability
     - "Equipment"  # G  — Use Equipment
     - ""           # H
-    - ""           # J
+    - "Flashlight"  # J
     - ""           # K
     - ""           # L
     - ""           # ;

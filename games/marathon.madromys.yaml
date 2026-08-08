@@ -1,0 +1,14 @@
+# Marathon (Bungie, 2026) Ploopy Adept cheat sheet — raw key inputs for the gaming layer.
+# Cells in left-to-right order: top-outer-L, top-inner-L, top-inner-R, top-outer-R, bottom-L, bottom-R.
+# Transparent keys fall through to Base (M2, M1, M3).
+
+layout: {qmk_keyboard: ploopyco/madromys/rev1_001, layout_name: LAYOUT}
+
+layers:
+  Marathon (Adept):
+    - "Healing"    # top-outer-L
+    - "Wpn 2"      # top-inner-L
+    - "Wpn 1"      # top-inner-R
+    - "Aim/Scope"  # top-outer-R  (base)
+    - "Fire"       # bottom-L     (base)
+    - "Ping"       # bottom-R     (base)

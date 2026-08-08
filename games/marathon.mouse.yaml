@@ -7,8 +7,8 @@ layout: { qmk_info_json: layouts/mouse.json }
 
 layers:
   Marathon mouse:
-    - ""            # Thumb forward (M5)
-    - ""            # Thumb back    (M4)
+    - "Equip Wpn 2" # Thumb forward (M5)
+    - "Heal"        # Thumb back    (M4)
     - "Fire"        # Left click
     - "Weapon 1"    # Wheel up
     - "Ping"        # Wheel click

@@ -22,12 +22,13 @@
 #define RG_MARGIN_X  12
 #define RG_MARGIN_Y  5
 
-/* Space-filling banner: after best-fit framing, the leftover x beyond the route's
- * rendered extent is the banner budget. A strip that clears the floor is reserved
- * at the destination side and the route is shifted away from it. Gutter is the
- * clear gap between the route and the strip. First-pass values — tune vs. previews. */
-#define RG_BANNER_GUTTER 3   /* clear px between route extent and banner strip */
-#define RG_BANNER_MIN_W  12  /* below this strip width → no banner (center as before) */
+/* Telemetry strip: after best-fit framing, the long-axis space the rendered content
+ * (rings included) leaves over is split — the map is centered in it and the high-x end
+ * holds a stacked label/value strip, flush to the edge. The strip's field/line geometry
+ * (GFX_TEL_*) lives in oled_gfx.h so the bake and the per-frame overlay size it the same
+ * way. No static end padding: the content uses the full long axis, with only the
+ * centering gaps between the map and the strip / opposite edge. (RG_MARGIN_X still
+ * insets the best-fit framing — a separate knob from the strip layout.) */
 
 /* Framing sweep: choose the rotation that best fits the visited path into the wide
  * panel rather than always aligning dep→dest with +x. */
@@ -44,7 +45,8 @@ typedef struct {
     uint8_t   type;          /* GFX_LEG_TRANSFER / GFX_LEG_COAST */
     rg_vec2_t p0, p1;        /* world endpoints */
     rg_vec2_t ctrl;          /* TRANSFER: Bézier control (world) */
-    rg_vec2_t through;       /* COAST: the planet position the arc bows through */
+    rg_vec2_t through;       /* COAST: the pivot body position the arc bows through */
+    rg_vec2_t center;        /* COAST: arc center (star for heliocentric, planet for local) */
     float     coast_r;       /* COAST: orbital radius (world) */
 } rg_leg_t;
 
@@ -54,6 +56,7 @@ typedef struct {
     int        leg_count;
     uint8_t    topology;
     int        mid_planet_idx;   /* body index, or -1 */
+    rg_vec2_t  frame_center;     /* gravitational frame: (0,0) star, or host planet for a local route */
 
     /* framing */
     float   cos_phi, sin_phi;    /* rotate dep→dest onto +x */
@@ -61,6 +64,11 @@ typedef struct {
     float   scale;               /* px per world unit */
     int16_t arc_cx, arc_cy;      /* star in display space */
     uint16_t eta_minutes;
+
+    /* Explain hook (host-only readers): the named pivot the flyby/coast threads.
+     * Plain ints set during planning, never read on-device — firmware-safe. */
+    int     pivot_idx;           /* lagr_idx the flyby/coast threads, or -1 (direct / no pivot) */
+    int     flyby_lagrange;      /* STARMAP_L1 / STARMAP_L2 for a flyby, else -1               */
 } rg_plan_t;
 
 /* ── Geometry helpers ───────────────────────────────────────────────────────── */
@@ -77,12 +85,14 @@ static rg_vec2_t rg_rotate(rg_vec2_t v, float c, float s) {
 #define RG_BOW_ALONG_MAX 0.50f
 
 /* Transfer control point: intersection of the orbital tangent lines at both
- * endpoints (tangent ⟂ the radial from the star) so the Bézier leaves and
+ * endpoints (tangent ⟂ the radial from the frame center) so the Bézier leaves and
  * arrives tangent to the orbits — a real transfer arc, not a tween. The control
  * is then decomposed onto the chord and clamped, preserving tangent *direction*
  * while bounding how far it bows. Near-parallel tangents fall back to a
- * star-ward bow. */
-static rg_vec2_t rg_transfer_control(rg_vec2_t p0, rg_vec2_t p1) {
+ * center-ward bow. `center` is the gravitational frame's center: the star (0,0)
+ * for a heliocentric route, the host planet for a planet-local one — so a local
+ * hop bows around its planet, not the distant star. */
+static rg_vec2_t rg_transfer_control(rg_vec2_t p0, rg_vec2_t p1, rg_vec2_t center) {
     rg_vec2_t mid = { (p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f };
     rg_vec2_t D   = { p1.x - p0.x, p1.y - p0.y };
     float dlen    = sqrtf(D.x * D.x + D.y * D.y);
@@ -91,17 +101,21 @@ static rg_vec2_t rg_transfer_control(rg_vec2_t p0, rg_vec2_t p1) {
     rg_vec2_t u   = { D.x / dlen, D.y / dlen };       /* along chord */
     rg_vec2_t nrm = { -u.y, u.x };                    /* chord normal */
 
+    /* Radials measured from the frame center (origin → unchanged from the old
+     * star-relative form). */
+    rg_vec2_t r0  = { p0.x - center.x, p0.y - center.y };
+    rg_vec2_t r1  = { p1.x - center.x, p1.y - center.y };
     rg_vec2_t cand;
-    rg_vec2_t d0  = { -p0.y, p0.x };                  /* tangent at p0 (⟂ radial) */
-    rg_vec2_t d1  = { -p1.y, p1.x };
+    rg_vec2_t d0  = { -r0.y, r0.x };                  /* tangent at p0 (⟂ radial) */
+    rg_vec2_t d1  = { -r1.y, r1.x };
     float det     = d1.x * d0.y - d0.x * d1.y;
     if (fabsf(det) > 1e-4f) {
         float a = (d1.x * D.y - d1.y * D.x) / det;
         cand.x = p0.x + a * d0.x;
         cand.y = p0.y + a * d0.y;
     } else {
-        /* Tangents parallel: bow toward the star. */
-        rg_vec2_t ts = { -mid.x, -mid.y };
+        /* Tangents parallel: bow toward the frame center. */
+        rg_vec2_t ts = { center.x - mid.x, center.y - mid.y };
         float perp_sign = (ts.x * nrm.x + ts.y * nrm.y) < 0.0f ? -1.0f : 1.0f;
         cand.x = mid.x + perp_sign * 0.4f * dlen * nrm.x;
         cand.y = mid.y + perp_sign * 0.4f * dlen * nrm.y;
@@ -136,14 +150,14 @@ static void rg_add_transfer(rg_plan_t *pl, rg_vec2_t p0, rg_vec2_t p1) {
     rg_leg_t *l = &pl->legs[pl->leg_count++];
     l->type = GFX_LEG_TRANSFER;
     l->p0 = p0; l->p1 = p1;
-    l->ctrl = rg_transfer_control(p0, p1);
+    l->ctrl = rg_transfer_control(p0, p1, pl->frame_center);
 }
 
 static void rg_add_coast(rg_plan_t *pl, rg_vec2_t p0, rg_vec2_t p1,
-                         rg_vec2_t through, float radius) {
+                         rg_vec2_t through, rg_vec2_t center, float radius) {
     rg_leg_t *l = &pl->legs[pl->leg_count++];
     l->type = GFX_LEG_COAST;
-    l->p0 = p0; l->p1 = p1; l->through = through; l->coast_r = radius;
+    l->p0 = p0; l->p1 = p1; l->through = through; l->center = center; l->coast_r = radius;
 }
 
 /* World-space point along a leg at s∈[0,1] — used by the bbox fit so framing
@@ -152,14 +166,15 @@ static void rg_add_coast(rg_plan_t *pl, rg_vec2_t p0, rg_vec2_t p1,
  * the pack-time display arc. */
 static rg_vec2_t rg_leg_world_point(const rg_leg_t *l, float s) {
     if (l->type == GFX_LEG_COAST) {
-        float a0 = atan2f(l->p0.y, l->p0.x);
-        float a1 = atan2f(l->p1.y, l->p1.x);
-        float ap = atan2f(l->through.y, l->through.x);
+        float a0 = atan2f(l->p0.y - l->center.y, l->p0.x - l->center.x);
+        float a1 = atan2f(l->p1.y - l->center.y, l->p1.x - l->center.x);
+        float ap = atan2f(l->through.y - l->center.y, l->through.x - l->center.x);
         float sweep_pos = rg_norm_angle(a1 - a0);
         float dp        = rg_norm_angle(ap - a0);
         float sweep     = (dp < sweep_pos) ? sweep_pos : (sweep_pos - RG_TWO_PI);
         float a = a0 + sweep * s;
-        rg_vec2_t p = { l->coast_r * cosf(a), l->coast_r * sinf(a) };
+        rg_vec2_t p = { l->center.x + l->coast_r * cosf(a),
+                        l->center.y + l->coast_r * sinf(a) };
         return p;
     }
     float mt = 1.0f - s;
@@ -207,6 +222,51 @@ static rg_fit_t rg_fit_candidate(const rg_plan_t *pl, float c, float s) {
     return f;
 }
 
+/* Heliocentric mid-planet for a flyby/coast: an interior planet (never the
+ * innermost or outermost — those frame poorly) that is NOT an endpoint's own
+ * planet and, where possible, orbits between the two endpoints. Excluding the
+ * endpoints' planets stops a coast/flyby from threading an endpoint's own orbit
+ * ring — the heliocentric twin of the planet↔moon loop; the between-orbits
+ * preference keeps the assist on the way rather than a detour. An endpoint's
+ * "planet" is itself if it is a planet, its parent if it is a moon; trojans and
+ * vagrants have no host planet to exclude. Sets pl->mid_planet_idx, leaving it −1
+ * when no usable intermediary exists (forcing a direct hop). */
+static void rg_pick_mid_planet(const starmap_system_t *sys, starmap_rng_t *rng,
+                               rg_vec2_t depart, rg_vec2_t dest, rg_plan_t *pl) {
+    pl->mid_planet_idx = -1;
+    if (sys->planet_count < 3) return;            /* no interior band to thread */
+
+    const starmap_body_t *d = &sys->bodies[sys->depart_idx];
+    const starmap_body_t *e = &sys->bodies[sys->dest_idx];
+    int excl0 = (d->type == STARMAP_PLANET) ? sys->depart_idx
+              : (d->type == STARMAP_MOON)   ? d->parent_idx : -1;
+    int excl1 = (e->type == STARMAP_PLANET) ? sys->dest_idx
+              : (e->type == STARMAP_MOON)   ? e->parent_idx : -1;
+
+    /* Endpoint heliocentric radii bound the "between" band. */
+    float r_dep = sqrtf(depart.x * depart.x + depart.y * depart.y);
+    float r_dst = sqrtf(dest.x * dest.x + dest.y * dest.y);
+    float r_lo  = (r_dep < r_dst) ? r_dep : r_dst;
+    float r_hi  = (r_dep < r_dst) ? r_dst : r_dep;
+
+    /* Candidate interior planets (planet_idx[1 .. count-2]) minus the endpoints'
+     * planets, split into those orbiting between the endpoints and the rest. */
+    int between[STARMAP_MAX_PLANETS], other[STARMAP_MAX_PLANETS];
+    int nb = 0, no = 0;
+    for (int i = 1; i <= sys->planet_count - 2; i++) {
+        int idx = sys->planet_idx[i];
+        if (idx == excl0 || idx == excl1) continue;
+        float r = sys->bodies[idx].orbital_radius;
+        if (r >= r_lo && r <= r_hi) between[nb++] = idx;
+        else                        other[no++]  = idx;
+    }
+
+    const int *pool = nb ? between : other;
+    int n = nb ? nb : no;
+    if (n == 0) return;                           /* nothing usable → direct hop */
+    pl->mid_planet_idx = pool[starmap_rng_range(rng, 0, n - 1)];
+}
+
 /* ── Stage 1+2: build the system and plan the route ─────────────────────────── */
 static void rg_plan(const char *designation, rg_plan_t *pl) {
     memset(pl, 0, sizeof(*pl));
@@ -224,20 +284,50 @@ static void rg_plan(const char *designation, rg_plan_t *pl) {
     starmap_world_pos(sys, sys->dest_idx, &ex, &ey);
     rg_vec2_t dest = { ex, ey };
 
-    /* Pick an interior planet to thread (flyby/coast need one). */
+    /* Frame classification: a trip from a planet to its *own* moon is planned in
+     * that planet's local frame — waypoints are the moon's planet-relative Lagrange
+     * points (~moon-orbit scale) and the coast/transfers center on the host planet,
+     * so the route stays local instead of looping out to the star's neighborhood.
+     * Moons are the only non-star body and there is ≤1 per planet, so planet↔its-own-
+     * moon is the only intra-subsystem pair; every other trip is heliocentric (see
+     * .claude/docs/route-frames.md for the full trip→frame taxonomy). */
+    const starmap_body_t *d = &sys->bodies[sys->depart_idx];
+    const starmap_body_t *e = &sys->bodies[sys->dest_idx];
+    int local_pivot = -1, local_host = -1;   /* the moon, and its host planet */
+    if (e->type == STARMAP_MOON && e->parent_idx == sys->depart_idx) {
+        local_pivot = sys->dest_idx;   local_host = sys->depart_idx;
+    } else if (d->type == STARMAP_MOON && d->parent_idx == sys->dest_idx) {
+        local_pivot = sys->depart_idx; local_host = sys->dest_idx;
+    }
+    bool local = local_pivot >= 0;
+
+    /* Unify both frames behind one pivot body (whose Lagrange points the flyby/coast
+     * threads), one frame center (what the route bows around), and a can_thread gate.
+     * Local: pivot = the moon, center = the host planet, always threadable. Else:
+     * pivot = a heliocentric mid-planet, center = the star (origin), threadable only
+     * when such a planet exists. A local route never draws a mid-planet, so
+     * mid_planet_idx keeps its −1 init and the framing fit bounds only the path. */
+    int  lagr_idx;
+    bool can_thread;
     pl->mid_planet_idx = -1;
-    if (sys->planet_count >= 3) {
-        int lo = 1, hi = sys->planet_count - 2;
-        int ord = (hi >= lo) ? starmap_rng_range(&rng, lo, hi) : 1;
-        pl->mid_planet_idx = sys->planet_idx[ord];
+    pl->pivot_idx = -1; pl->flyby_lagrange = -1;
+    if (local) {
+        lagr_idx = local_pivot;
+        starmap_world_pos(sys, local_host, &pl->frame_center.x, &pl->frame_center.y);
+        can_thread = true;
+    } else {
+        rg_pick_mid_planet(sys, &rng, depart, dest, pl);   /* sets mid_planet_idx */
+        lagr_idx = pl->mid_planet_idx;
+        pl->frame_center = (rg_vec2_t){ 0.0f, 0.0f };      /* star at the origin */
+        can_thread = pl->mid_planet_idx >= 0;
     }
 
-    /* Topology: a 2-planet system can only be a direct hop. When an interior
-     * planet exists, pick weighted direct:flyby:coast = 4:27:9 (/40 ≈ 10/68/22).
-     * Combined with the ~89% of systems that host ≥3 planets (the other ~11% are
-     * forced direct), this lands the overall leg split near 20/60/20 single/double/
-     * triple — the gravity-assist flyby is the common, visually interesting case. */
-    if (pl->mid_planet_idx < 0) {
+    /* Topology: with no pivot to thread, only a direct hop. Otherwise pick weighted
+     * direct:flyby:coast = 4:27:9 (/40 ≈ 10/68/22). Combined with the ~89% of systems
+     * that host ≥3 planets (the other ~11% are forced direct), this lands the overall
+     * leg split near 20/60/20 single/double/triple — the gravity-assist flyby is the
+     * common, visually interesting case. */
+    if (!can_thread) {
         pl->topology = RG_DIRECT;
     } else {
         int roll = starmap_rng_range(&rng, 0, 39);         /* 0..39 */
@@ -251,8 +341,9 @@ static void rg_plan(const char *designation, rg_plan_t *pl) {
         case RG_FLYBY: {
             starmap_lagrange_t which = (starmap_rng_range(&rng, 0, 1) == 0)
                                        ? STARMAP_L1 : STARMAP_L2;
+            pl->flyby_lagrange = (int)which;
             float lx, ly;
-            starmap_lagrange_pos(sys, pl->mid_planet_idx, which, &lx, &ly);
+            starmap_lagrange_pos(sys, lagr_idx, which, &lx, &ly);
             rg_vec2_t lp = { lx, ly };
             rg_add_transfer(pl, depart, lp);
             rg_add_transfer(pl, lp, dest);
@@ -260,13 +351,13 @@ static void rg_plan(const char *designation, rg_plan_t *pl) {
         }
         case RG_COAST: {
             float l4x, l4y, l5x, l5y, px, py;
-            starmap_lagrange_pos(sys, pl->mid_planet_idx, STARMAP_L4, &l4x, &l4y);
-            starmap_lagrange_pos(sys, pl->mid_planet_idx, STARMAP_L5, &l5x, &l5y);
-            starmap_world_pos(sys, pl->mid_planet_idx, &px, &py);
+            starmap_lagrange_pos(sys, lagr_idx, STARMAP_L4, &l4x, &l4y);
+            starmap_lagrange_pos(sys, lagr_idx, STARMAP_L5, &l5x, &l5y);
+            starmap_world_pos(sys, lagr_idx, &px, &py);   /* pivot sits between its L4/L5 */
             rg_vec2_t l4 = { l4x, l4y }, l5 = { l5x, l5y }, pp = { px, py };
-            float coast_r = sys->bodies[pl->mid_planet_idx].orbital_radius;
+            float coast_r = sys->bodies[lagr_idx].orbital_radius;
             rg_add_transfer(pl, depart, l4);
-            rg_add_coast(pl, l4, l5, pp, coast_r);
+            rg_add_coast(pl, l4, l5, pp, pl->frame_center, coast_r);
             rg_add_transfer(pl, l5, dest);
             break;
         }
@@ -275,6 +366,9 @@ static void rg_plan(const char *designation, rg_plan_t *pl) {
             rg_add_transfer(pl, depart, dest);
             break;
     }
+    /* A non-direct topology threads the pivot whose Lagrange points its legs visit
+     * (the moon for a local route, else the heliocentric mid-planet). */
+    if (pl->topology != RG_DIRECT) pl->pivot_idx = lagr_idx;
 
     /* ── Stage 3: fit-optimal framing rotation ──────────────────────────────
      * Sweep candidate rotations over the half-circle [0,π) and keep the one whose
@@ -379,53 +473,26 @@ static float rg_leg_len(const gfx_leg_t *l) {
     return len;
 }
 
-/* ── Banner: measure content extent, then shift the route away from the strip ───
- * The content x-extent [x0,x1] is measured the way the renderer lights it — min/max
- * over each ring's horizontal reach (center ± radius), each leg's drawn path, and
- * every marker / decoration body with its pixel half-width. Deterministic and host-
- * testable (no rasterize-then-scan), matching the leftmost→rightmost lit pixel.
- *
- * The extent is *true*, not clamped to the panel: a decoration ring that runs off
- * the right edge is clipped today, but the left-justifying shift below would slide
- * that clipped part back on-screen into the banner strip. Counting the off-panel
- * reach inflates w_img and suppresses the banner in exactly those cases, so once a
- * banner is placed nothing the shift reveals can collide with it. */
-static void rg_content_xspan(const gfx_route_t *out, int16_t *x0, int16_t *x1) {
-    float lo = 1e9f, hi = -1e9f;
-    #define RG_ACC(v) do { float _v = (float)(v); if (_v < lo) lo = _v; if (_v > hi) hi = _v; } while (0)
-
-    for (int i = 0; i < out->arc_count; i++) {
-        int16_t c = out->arcs[i].local_center ? out->arcs[i].cx : out->arc_cx;
-        RG_ACC(c - out->arcs[i].radius);
-        RG_ACC(c + out->arcs[i].radius);
-    }
-    for (int i = 0; i < out->leg_count; i++) {
-        const gfx_leg_t *l = &out->legs[i];
-        for (int k = 0; k <= 8; k++) {
-            float s = (float)k / 8.0f, lx;
-            if (l->type == GFX_LEG_COAST) {
-                lx = (float)l->cx + (float)l->arc_r * cosf(l->a0 + l->a_sweep * s);
-            } else {
-                int16_t bx, by;
-                gfx_prim_bezier_point(l->p0x, l->p0y, l->cx, l->cy, l->p1x, l->p1y, s, &bx, &by);
-                lx = (float)bx;
-            }
-            RG_ACC(lx);
+/* ── Banner: measure the *visible* content extent, then shift the map off the strip ─
+ * Bake the content once (banner_w is still 0 here, so only the map's rings / legs /
+ * markers / bodies draw) and scan for the leftmost→rightmost lit column. This is the
+ * on-panel footprint that actually draws — unlike a geometric ring center±radius span,
+ * an off-panel star's big rings only light a small on-panel cap, so the strip is laid
+ * out against the pixels you see rather than phantom off-panel ring reach. The strip
+ * stays out of the map because the layout centers the map and reserves the breather;
+ * test_strip_region_clear_of_graphics asserts that invariant across the sweep. */
+static void rg_lit_xspan(const gfx_route_t *out, int16_t *x0, int16_t *x1) {
+    uint8_t buf[512];
+    gfx_route_bake_bg(out, buf);
+    int lo = 128, hi = -1;
+    for (int x = 0; x < 128; x++) {
+        for (int page = 0; page < 4; page++) {
+            if (buf[page * 128 + x]) { if (x < lo) lo = x; if (x > hi) hi = x; break; }
         }
     }
-    for (int i = 0; i < out->marker_count; i++) {   /* reticle/ring/cross ±3, body ±1 */
-        int16_t hw = (out->markers[i].type == GFX_MARKER_BODY) ? 1 : 3;
-        RG_ACC(out->markers[i].x - hw);
-        RG_ACC(out->markers[i].x + hw);
-    }
-    for (int i = 0; i < out->body_count; i++) {
-        RG_ACC(out->bodies[i].x - 1);
-        RG_ACC(out->bodies[i].x + 1);
-    }
-    #undef RG_ACC
-
-    *x0 = (int16_t)floorf(lo);   /* round outward so the banner fully clears */
-    *x1 = (int16_t)ceilf(hi);
+    if (hi < 0) { lo = 0; hi = 0; }   /* empty content (shouldn't happen) */
+    *x0 = (int16_t)lo;
+    *x1 = (int16_t)hi;
 }
 
 /* Translate every packed x by dx — equivalent to injecting the offset into both
@@ -501,10 +568,13 @@ void route_gen_build(const char *designation, gfx_route_t *out) {
             dst->cx = rg_dx(&pl, src->ctrl.x, src->ctrl.y);
             dst->cy = rg_dy(&pl, src->ctrl.x, src->ctrl.y);
         } else {
-            /* Coast arc: center = star, radius scaled, sweep the short way that
-             * passes through the planet. */
-            dst->cx    = pl.arc_cx;
-            dst->cy    = pl.arc_cy;
+            /* Coast arc: center = the leg's frame center (star for a heliocentric
+             * route, the host planet for a planet-local one), radius scaled, sweep
+             * the short way that passes through the pivot body. For an interplanetary
+             * coast center == (0,0), so rg_dx/rg_dy collapse to arc_cx/arc_cy —
+             * byte-identical to the old `dst->cx = pl.arc_cx` path. */
+            dst->cx    = rg_dx(&pl, src->center.x, src->center.y);
+            dst->cy    = rg_dy(&pl, src->center.x, src->center.y);
             dst->arc_r = rg_radius_px(src->coast_r, pl.scale);
             float a0 = atan2f((float)(dst->p0y - dst->cy), (float)(dst->p0x - dst->cx));
             float a1 = atan2f((float)(dst->p1y - dst->cy), (float)(dst->p1x - dst->cx));
@@ -562,22 +632,67 @@ void route_gen_build(const char *designation, gfx_route_t *out) {
         rg_add_body(out, &pl, bx, by);
     }
 
-    /* Destination spectral class (always — telemetry/banner second line) plus the
-     * space-filling banner when the framing left a wide enough x-gap. */
+    /* Destination spectral class (still computed for the struct/tests, no longer drawn)
+     * and the origin designation (ORG strip value). The departure body isn't pinned by
+     * the seed token the way the destination is, so its designation is derived. */
     starmap_spectral_class(sys->seed, &sys->bodies[sys->dest_idx], sys->dest_idx,
                            out->dest_class);
-    out->banner_x = 0;
-    out->banner_w = 0;
+    starmap_designation(sys->seed, sys, sys->depart_idx, out->origin);
+    /* Destination colony status — DOCKED/LANDED at arrival, colony/unpopulated in the
+     * host CLI. Pinned to the destination body, deterministic per token. */
+    out->is_colony = starmap_is_colony(sys->seed, sys, sys->dest_idx) ? 1u : 0u;
+
+    /* Telemetry strip + long-axis layout. Measure the *visible* (lit) content extent M and
+     * the leftover L over the full long axis. Reserve a fixed GFX_TEL_MAP_GAP breather
+     * between the map and the strip *before* packing fields, so the text always clears the
+     * graphics — this deliberately overrides the equal-gap split (text and map were reading
+     * too close). As many fields as fit the remaining budget (cap GFX_TEL_NFIELDS) stack
+     * flush to the high-x edge; the strip's slack beyond the breather balances the map on
+     * the low-x side (it re-centers once there is room to spare). L too small for even one
+     * breathing field ⇒ no strip, the visible map centered full-bleed with rings free to
+     * spill — desired variety, not a fallback. The framing/zoom is unchanged. Because M is
+     * the lit footprint (not the geometric ring span), a route whose star sits off-panel
+     * reclaims the empty margin its big rings leave for a strip. */
     {
         int16_t x0, x1;
-        rg_content_xspan(out, &x0, &x1);
-        int16_t w_img    = (int16_t)(x1 - x0);
-        int16_t leftover = (int16_t)((128 - 2 * RG_MARGIN_X) - w_img);
-        int16_t w_ban    = (int16_t)(leftover - RG_BANNER_GUTTER);
-        if (w_ban >= RG_BANNER_MIN_W) {
-            rg_shift_route_x(out, (int16_t)(RG_MARGIN_X - x0));   /* left-justify route */
-            out->banner_x = (uint8_t)(RG_MARGIN_X + w_img + RG_BANNER_GUTTER);
-            out->banner_w = (uint8_t)w_ban;
+        rg_lit_xspan(out, &x0, &x1);
+        int16_t M = (int16_t)(x1 - x0);
+        int16_t L = (int16_t)(128 - M);
+        /* A strip reserves the breather plus GFX_TEL_CHIP_PAD at the high-x edge — the top
+         * label's inverse chip needs that 1 px border on-panel, not clipped at x=128. */
+        int16_t budget = (int16_t)(L - GFX_TEL_MAP_GAP - GFX_TEL_CHIP_PAD);
+        int n = (budget >= 2 * GFX_TT_ROWS + GFX_TEL_GAP) ? gfx_tel_nfields((uint8_t)budget) : 0;
+        int16_t textSize = n ? (int16_t)(n * 2 * GFX_TEL_PITCH - GFX_TEL_GAP) : 0;
+        bool placed = false;
+        if (n) {
+            int16_t slack    = (int16_t)(L - textSize - GFX_TEL_CHIP_PAD);  /* leftGap + map↔strip gap */
+            int16_t rightGap = (int16_t)(slack / 2);
+            if (rightGap < GFX_TEL_MAP_GAP) rightGap = GFX_TEL_MAP_GAP;  /* guarantee the breather */
+            int16_t leftGap  = (int16_t)(slack - rightGap);        /* ≥ 0: budget reserved the gap */
+            int16_t dx       = (int16_t)(leftGap - x0);
+            int16_t banner_x = (int16_t)(128 - textSize - GFX_TEL_CHIP_PAD);
+            rg_shift_route_x(out, dx);                             /* map left, breather to the strip */
+            /* Centering the map by the *visible* extent can pull a ring whose cap was just
+             * off-panel back on-screen toward the strip. Re-measure the shifted content; if
+             * anything now eats into the breather (within GFX_TEL_MAP_GAP of the strip), this
+             * route can't carry one without crowding the text — undo and fall back to
+             * no-strip full-bleed (rare; ~the off-panel-edge ring case the old geometric
+             * measure used to suppress wholesale). */
+            int16_t sx0, sx1;
+            rg_lit_xspan(out, &sx0, &sx1);
+            if (sx1 <= (int16_t)(banner_x - GFX_TEL_MAP_GAP)) {
+                out->banner_w = (uint8_t)textSize;
+                out->banner_x = (uint8_t)banner_x;     /* PAD reserved above for the top chip border */
+                placed = true;
+            } else {
+                rg_shift_route_x(out, (int16_t)(-dx));  /* undo: back to the unshifted measure */
+            }
+        }
+        if (!placed) {
+            /* No strip: center the visible content full-bleed (lit M ≤ 127 keeps it on-panel). */
+            rg_shift_route_x(out, (int16_t)(L / 2 - x0));
+            out->banner_w = 0;
+            out->banner_x = 0;
         }
     }
 }
@@ -653,5 +768,35 @@ void route_gen_describe(const char *designation) {
            pl.scale, pl.arc_cx, pl.arc_cy,
            atan2f(pl.sin_phi, pl.cos_phi) * 180.0f / RG_PI);
     fflush(stdout);
+}
+
+void route_gen_explain(const char *token, route_explain_t *out) {
+    rg_plan_t pl;
+    rg_plan(token, &pl);
+    const starmap_system_t *sys = &pl.sys;
+
+    memset(out, 0, sizeof(*out));
+    out->topology       = pl.topology;
+    out->eta_minutes    = pl.eta_minutes;
+    out->leg_count      = (uint8_t)pl.leg_count;
+    out->depart_type    = sys->bodies[sys->depart_idx].type;
+    out->dest_type      = sys->bodies[sys->dest_idx].type;
+    out->flyby_lagrange = (int8_t)pl.flyby_lagrange;
+    if (pl.pivot_idx >= 0) {
+        out->pivot_type = sys->bodies[pl.pivot_idx].type;
+        /* A planet↔own-moon local route threads the *destination* moon's own Lagrange
+         * points, so the pivot and the destination are one body. The destination shows
+         * the token verbatim (sys->designation), while starmap_designation would derive
+         * a different label for the same body — so reuse the destination's designation
+         * to keep the itinerary self-consistent. (When the pivot is the departure body,
+         * its derived designation already matches the derived ORG label, so the plain
+         * starmap_designation path stays consistent there.) */
+        if (pl.pivot_idx == sys->dest_idx)
+            memcpy(out->pivot, sys->designation, sizeof(out->pivot));
+        else
+            starmap_designation(sys->seed, sys, pl.pivot_idx, out->pivot);
+    } else {
+        out->pivot[0] = '\0';
+    }
 }
 #endif /* RG_HOST */

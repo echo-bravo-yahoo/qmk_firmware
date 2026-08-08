@@ -71,12 +71,17 @@ typedef struct {
     char         system_name[12];   /* proper system name, e.g. "CALPAMOS"   */
     char         designation[8];    /* destination, e.g. "LV-426"            */
 
-    /* Space-filling banner: when best-fit framing leaves a wide x-gap on a compact
-     * route, a placard (designation + spectral class) fills it. Appended last so
-     * the ctypes bridge stays stable (gfx_route_sizeof asserts parity). */
-    char         dest_class[4];     /* destination spectral class, e.g. "D4" / "III" */
-    uint8_t      banner_x;          /* banner strip left x (0 ⇒ no banner)            */
-    uint8_t      banner_w;          /* banner strip width  (0 ⇒ no banner)            */
+    /* Telemetry strip: when best-fit framing leaves long-axis room, route_gen centers
+     * the map on the long axis and reserves [banner_x, banner_x+banner_w) at the high-x
+     * end for a stacked label/value strip (DST/ORG/ETA/STATUS/SYS). banner_x/banner_w
+     * name that strip; dest_class is still computed (tests/struct parity) but no longer
+     * drawn. Fields appended last so the ctypes bridge stays stable (gfx_route_sizeof
+     * asserts parity). */
+    char         dest_class[4];     /* destination spectral class, e.g. "D4" / "III" (computed, not drawn) */
+    uint8_t      banner_x;          /* strip left x (0 ⇒ no strip) */
+    uint8_t      banner_w;          /* strip width  (0 ⇒ no strip) */
+    char         origin[8];         /* ORG value: departure-body designation (derived) */
+    uint8_t      is_colony;         /* destination colony status (1 ⇒ DOCKED, 0 ⇒ LANDED); see starmap_is_colony */
 } gfx_route_t;
 
 /* ── Primitives ─────────────────────────────────────────────────────────────── */
@@ -104,6 +109,15 @@ void gfx_prim_crosshair(int16_t x, int16_t y, uint8_t size);
 void gfx_prim_text(int16_t x, int16_t y, const char *s, uint8_t scale);
 void gfx_prim_text_vertical(int16_t x, int16_t y_bottom, const char *s, uint8_t scale);
 
+/* Tom Thumb cell geometry. Shared (not private to oled_gfx.c) so route_gen and
+ * route_anim can size the telemetry strip against the same 3×5 font the renderer
+ * draws — one rotated text column is GFX_TT_ROWS px wide on the long axis. */
+#define GFX_TT_FIRST  0x20
+#define GFX_TT_LAST   0x7E
+#define GFX_TT_COLS   3
+#define GFX_TT_ROWS   5
+#define GFX_TT_ADV    4   /* per-char step (3 cols + 1 spacing) */
+
 /* ── Route rendering ────────────────────────────────────────────────────────── */
 void gfx_route_draw_bg(const gfx_route_t *route);
 void gfx_route_bake_bg(const gfx_route_t *route, uint8_t buf[512]);
@@ -117,6 +131,36 @@ uint8_t gfx_pulse_size(uint32_t now_ms);
 
 /* sizeof(gfx_route_t) — lets the host ctypes bridge assert struct-layout parity. */
 uint32_t gfx_route_sizeof(void);
+
+/* ── Telemetry strip ──────────────────────────────────────────────────────────
+ * route_gen reserves a strip [banner_x, banner_x+banner_w) flush to the long axis's
+ * high-x end, guaranteeing a GFX_TEL_MAP_GAP breather between the map and the strip.
+ * The strip stacks up to GFX_TEL_NFIELDS fields (DST, ORG, ETA, STATUS, SYS), each two
+ * rotated text lines — a label above a value. A "line" is one font column, GFX_TT_ROWS
+ * px wide on the long axis; lines are GFX_TEL_GAP apart, GFX_TEL_PITCH per line. Text is
+ * left-aligned on the short axis; labels render inverse (filled chip, text punched out).
+ * The bake draws every label plus the static (DST/ORG/SYS) values; route_anim redraws
+ * the dynamic ETA and STATUS values per frame. Both derive each line's long-axis
+ * position from banner_x/banner_w with these helpers, so they agree without storing
+ * coordinates. */
+#define GFX_TEL_GAP      2                          /* px between lines on the long axis */
+#define GFX_TEL_NFIELDS  5                          /* DST, ORG, ETA, STATUS, SYS        */
+#define GFX_TEL_PITCH    (GFX_TT_ROWS + GFX_TEL_GAP)   /* 7 px per line                  */
+#define GFX_TEL_MAP_GAP  (2 * GFX_TEL_PITCH)        /* guaranteed map↔strip breather (2 lines) */
+#define GFX_TEL_CHIP_PAD 1                          /* green border around inverse label text; also
+                                                       reserved at the strip's high-x end so the top
+                                                       label's border isn't clipped off-panel */
+
+/* Fields a strip of width bw holds (capped at GFX_TEL_NFIELDS); the set + top→bottom
+ * order for that count come from the per-count table in oled_gfx.c. */
+int  gfx_tel_nfields(uint8_t bw);
+/* Draw text line `line` (0 = top = high-x) of strip [bx, bx+bw) into the render target. */
+void gfx_tel_draw_line(uint8_t bx, uint8_t bw, int line, const char *s);
+/* Top→bottom slot of field `id` in an n-field strip, or -1 if absent. Shared so the
+ * per-frame overlay can locate the ETA/STATUS value lines without recomputing order. */
+int  gfx_tel_field_slot(int n, int id);
+/* STATUS phase word for gfx_phase_t (moved here from keymap.c so master + slave share). */
+const char *gfx_phase_word(uint8_t phase);
 
 /* ── Journey phase + burn warning ─────────────────────────────────────────────
  * The journey position t∈[0,1] (walked over the legs by cumulative arc length,

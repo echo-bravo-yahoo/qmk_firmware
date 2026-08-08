@@ -2,42 +2,50 @@
 
 Reference for how the transit-map generator labels a destination body: the **survey designation** (the
 `LV-426`-style prefix shown in telemetry / the banner) and its **spectral class** (the banner's second
-line). Both are _derived from intrinsic body properties_ — orbital role, composition, and a derived
-life-viability — never from the seed token, and never stored on `starmap_body_t` (so the ctypes mirror
-stays stable). Selection is pure `(seed, idx)` hashing: no RNG-stream draws, so topology/ETA rolls are
-untouched and host == device.
+line).
+
+**The seed token IS the survey designation.** A conforming `{PREFIX}-{digits}` token (PREFIX ∈
+`LV`/`BG`/`KG`/`RF`, case-insensitive) is echoed verbatim as the designation, and its prefix **pins the
+destination's body type** — the generator selects a matching body or, if the world lacks one, constructs
+it. So typing `LV-426` returns to the same system every time and lands on an `LV`-type world. (A malformed
+token falls back to the legacy _derived_ designation — see the fallback note below.) The **spectral class**
+stays property-derived and is never stored on `starmap_body_t` (so the ctypes mirror stays stable); its
+selection is pure `(seed, idx)` hashing — no RNG-stream draws, so topology/ETA rolls are untouched and
+host == device.
 
 ## Survey designations
 
 The franchise never published a systematic prefix taxonomy — Cameron has said `LV` is officially
 _meaningless_, and the canonical prefixes each appear on only a handful of bodies (`KG`/`BG` once each).
-This generator makes a deliberate, canon-compatible choice: **the prefix is a property-derived _class_
-label** (not a survey-catalog code as real astronomy uses — HD/NGC/Gliese name the catalog, not the body).
+This generator makes a deliberate, canon-compatible choice: **the prefix pins the destination's _type_**,
+and the typed token is the designation (not a survey-catalog code as real astronomy uses — HD/NGC/Gliese
+name the catalog, not the body). The serial column is the band the auto-cycler emits (a typed token may
+carry any 1–4-digit serial).
 
-| Prefix | Assigned when (properties)                                            | Meaning              | Serial    | Canon grounding                                                                                                                               |
-| ------ | --------------------------------------------------------------------- | -------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LV`   | major rocky body (moon **or** planet), in the habitable band + viable | Life-Viable world    | 100–1299  | LV-426 (moon, _Aliens_); LV-178 / LV-895 (planets, novel / game). "Life Viable" is the adopted fan reading — Cameron: officially meaningless. |
-| `KG`   | gas giant (by composition)                                            | Jovian / gas giant   | 100–999   | KG-348, the gas giant Sevastopol orbits (_Alien: Isolation_).                                                                                 |
-| `BG`   | major rocky body, **not** life-viable (out of band, or barren roll)   | colony / barren rock | 100–999   | BG-386, Freya's Prospect colony (_Alien: Isolation_).                                                                                         |
-| `RF`   | minor body (trojan or vagrant)                                        | minor-body catalog   | 1000–9999 | none — invented; canon has no minor-body prefix.                                                                                              |
+| Prefix | Destination type pinned              | Meaning              | Serial    | Canon grounding                                                                                                                               |
+| ------ | ------------------------------------ | -------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LV`   | moon **or** rocky planet             | Life-Viable world    | 100–1299  | LV-426 (moon, _Aliens_); LV-178 / LV-895 (planets, novel / game). "Life Viable" is the adopted fan reading — Cameron: officially meaningless. |
+| `KG`   | gas giant                            | Jovian / gas giant   | 100–999   | KG-348, the gas giant Sevastopol orbits (_Alien: Isolation_).                                                                                 |
+| `BG`   | moon **or** rocky planet (LV's pool) | colony / barren rock | 100–999   | BG-386, Freya's Prospect colony (_Alien: Isolation_).                                                                                         |
+| `RF`   | trojan or vagrant                    | minor-body catalog   | 1000–9999 | none — invented; canon has no minor-body prefix.                                                                                              |
 
-**Why each:**
+**Why each type:**
 
-- **`LV` spans moons _and_ rocky planets** — faithful to canon (LV-426 is a moon; LV-178/895 are planets)
-  and to "Life Viable" being a _habitability_ property, orthogonal to orbital role. A habitable moon of a
-  band gas giant reads `LV` — exactly the LV-426/Calpamos shape.
-- **`LV` excludes minor bodies (→ `RF`).** Atmosphere retention needs ~Mars-mass+, but L4/L5 stability
-  requires a trojan be ≪ its host; real trojans are all small airless asteroids and a habitable trojan is
-  speculative/unconfirmed. This model's trojans/vagrants are asteroidal minor bodies, so they're never
-  life-viable.
-- **`KG` = gas giant**, matching KG-348. Gas-giant-ness is derived from orbital radius + a hash
-  (`sw_is_gas_giant`), not stored.
-- **`BG` = rocky but not life-viable** — the natural complement; canon BG-386 is a colony, and colonies
-  sit on non-naturally-viable / terraform worlds.
+- **`LV`/`BG` → moon or rocky planet** — faithful to canon (LV-426 is a moon; LV-178/895 are planets) and
+  to "Life Viable" being a _habitability_ property, orthogonal to orbital role. A `LV` moon of a gas giant
+  is the LV-426/Calpamos shape. Rock-vs-moon variety falls out of the candidate pool for free.
+- **`LV`/`BG` exclude minor bodies (those are `RF`).** Atmosphere retention needs ~Mars-mass+, but L4/L5
+  stability requires a trojan be ≪ its host; real trojans are all small airless asteroids and a habitable
+  trojan is speculative/unconfirmed. This model's trojans/vagrants are asteroidal minor bodies.
+- **`KG` → gas giant**, matching KG-348. Gas-giant-ness is derived from orbital radius + a hash
+  (`sw_is_gas_giant`); when the world has no gas giant, the outermost planet is promoted to one.
 
-Life-viability predicate (`sw_is_life_viable`, `starmap_world.c`): _major rocky body × in the habitable
-band `[SW_HZ_MIN, SW_HZ_MAX]` wu × a deterministic viability roll_ — a moon inherits its parent planet's
-heliocentric distance; the roll leaves some in-band worlds barren (`BG`) so `LV` stays meaningful.
+**`LV` vs `BG` is a label distinction only** — both pin the same body types, and the spectral class
+(type-keyed) is identical, so the two are physically indistinguishable on the panel. The habitable-band /
+viability model (`sw_is_life_viable`: _major rocky body × in the band `[SW_HZ_MIN, SW_HZ_MAX]` wu × a
+deterministic viability roll_, a moon inheriting its parent planet's heliocentric distance) now applies
+**solely to the malformed-token fallback** (`starmap_designation`), where it splits the randomly-chosen
+destination into `LV` (viable) vs `BG` (barren) so a non-conforming seed still reads as a plausible class.
 
 ## Spectral classes
 

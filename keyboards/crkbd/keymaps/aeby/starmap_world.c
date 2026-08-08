@@ -32,6 +32,58 @@ uint32_t starmap_seed(const char *designation) {
     return h;
 }
 
+/* ── Seed-token parser (seed-is-designation) ─────────────────────────────────
+ * A conforming token is "{PREFIX}-{1..4 digits}", case-insensitive, where PREFIX
+ * is one of LV/BG/KG/RF. The token IS the destination: it seeds the world and is
+ * echoed verbatim (uppercased) as the displayed designation, and its prefix pins
+ * the destination body's type (see sw_pin_destination / starmap_build). The serial
+ * is never interpreted numerically — only validated and copied. A non-conforming
+ * token yields ok=false, and the legacy derived-designation path runs instead. */
+typedef enum { SW_PFX_LV, SW_PFX_BG, SW_PFX_KG, SW_PFX_RF } sw_prefix_t;
+static const char SW_PFX_STR[4][3] = { "LV", "BG", "KG", "RF" };
+
+typedef struct {
+    bool        ok;                        /* false → malformed: take legacy derived path   */
+    sw_prefix_t prefix;
+    char        text[STARMAP_DESIG_LEN];   /* canonical "PP-NNNN", uppercased, ≤7 + NUL     */
+} sw_token_t;
+
+static char sw_upper(char c) {
+    return (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
+}
+
+static sw_token_t sw_parse_token(const char *tok) {
+    sw_token_t tk;
+    tk.ok = false;
+    tk.prefix = SW_PFX_LV;
+    tk.text[0] = '\0';
+    if (!tok || !tok[0] || !tok[1]) return tk;
+
+    /* Match the two-letter prefix, case-insensitively. */
+    char p0 = sw_upper(tok[0]), p1 = sw_upper(tok[1]);
+    int pfx = -1;
+    for (int i = 0; i < 4; i++) {
+        if (SW_PFX_STR[i][0] == p0 && SW_PFX_STR[i][1] == p1) { pfx = i; break; }
+    }
+    if (pfx < 0 || tok[2] != '-') return tk;
+
+    /* 1..4 digits, then end-of-string. */
+    int ndig = 0;
+    while (tok[3 + ndig] >= '0' && tok[3 + ndig] <= '9') ndig++;
+    if (ndig < 1 || ndig > 4 || tok[3 + ndig] != '\0') return tk;
+
+    /* Build the canonical "PP-DDDD" (≤7 chars, always fits STARMAP_DESIG_LEN). */
+    int n = 0;
+    tk.text[n++] = p0;
+    tk.text[n++] = p1;
+    tk.text[n++] = '-';
+    for (int i = 0; i < ndig && n < STARMAP_DESIG_LEN - 1; i++) tk.text[n++] = tok[3 + i];
+    tk.text[n] = '\0';
+    tk.prefix = (sw_prefix_t)pfx;
+    tk.ok = true;
+    return tk;
+}
+
 /* ── Recursive world position ───────────────────────────────────────────────── */
 void starmap_world_pos(const starmap_system_t *sys, int idx, float *x, float *y) {
     const starmap_body_t *b = &sys->bodies[idx];
@@ -43,10 +95,16 @@ void starmap_world_pos(const starmap_system_t *sys, int idx, float *x, float *y)
     *y = py + b->orbital_radius * sinf(b->angle);
 }
 
-/* ── Lagrange point of a star-orbiting planet ───────────────────────────────── */
+/* ── Lagrange point of an orbiting body, about its parent ────────────────────── */
 void starmap_lagrange_pos(const starmap_system_t *sys, int planet_body_idx,
                           starmap_lagrange_t which, float *x, float *y) {
     const starmap_body_t *p = &sys->bodies[planet_body_idx];
+    /* Center on the body's parent. A planet's parent is the star (origin), so this
+     * is a no-op for planets and matches the old heliocentric behavior; a moon's
+     * parent is its planet, yielding planet-local L-points at the moon's scale (the
+     * body's orbital_radius/angle are already parent-relative). */
+    float ox = 0.0f, oy = 0.0f;
+    if (p->parent_idx != 0xFF) starmap_world_pos(sys, p->parent_idx, &ox, &oy);
     float R  = p->orbital_radius;
     float th = p->angle;
     float a, rr;
@@ -58,8 +116,8 @@ void starmap_lagrange_pos(const starmap_system_t *sys, int planet_body_idx,
         case STARMAP_L5: default:
                          a = th - SW_LAGRANGE_TROJAN_ANGLE; rr = R;                     break;
     }
-    *x = rr * cosf(a);
-    *y = rr * sinf(a);
+    *x = ox + rr * cosf(a);
+    *y = oy + rr * sinf(a);
 }
 
 /* ── Procedural proper name (prefix + optional mid + suffix grammar) ──────────
@@ -112,15 +170,17 @@ static void sw_make_name(starmap_rng_t *rng, char *out) {
     }
 }
 
-/* ── Survey designation (derived from the destination body's properties) ───────
- * The displayed designation is no longer the seed token; it is a class label
- * derived from the destination's intrinsic properties — orbital role, composition
- * and a derived life-viability — never stored on starmap_body_t (so the ctypes
- * mirror stays stable). Grounded in canon: LV = Life-Viable world (moon OR rocky
- * planet in the habitable band — LV-426 is a moon, LV-178/895 are planets);
- * KG = Jovian gas giant, per KG-348; BG = rocky world that is not life-viable
- * (barren / colony), per BG-386; plus an invented minor-body catalog (RF) for
- * trojans/vagrants. See world-classification.md for the full rationale. */
+/* ── Survey designation (malformed-token fallback only) ────────────────────────
+ * For a conforming "{PREFIX}-{digits}" token the designation IS the token and the
+ * destination's type is pinned to the prefix (see starmap_build). This derived
+ * label is now reached ONLY when the token is malformed: it classifies the
+ * randomly-chosen destination from its intrinsic properties — orbital role,
+ * composition and a derived life-viability — never stored on starmap_body_t (so
+ * the ctypes mirror stays stable). Grounded in canon: LV = Life-Viable world (moon
+ * OR rocky planet in the habitable band — LV-426 is a moon, LV-178/895 are
+ * planets); KG = Jovian gas giant, per KG-348; BG = rocky world that is not
+ * life-viable (barren / colony), per BG-386; plus an invented minor-body catalog
+ * (RF) for trojans/vagrants. See world-classification.md for the full rationale. */
 
 /* Finalmix hash of (seed, idx) → a well-distributed 32-bit value. */
 static uint32_t sw_hash2(uint32_t seed, int idx) {
@@ -144,12 +204,15 @@ static bool sw_is_gas_giant(uint32_t seed, const starmap_body_t *body, int idx) 
     return (sw_hash2(seed ^ 0x5BD1E995u, idx) & 1u) != 0;
 }
 
-/* Life-viability for the LV designation: a major rocky body (moon or planet) in
- * the temperate habitable band. Derived (not stored) — mirrors sw_is_gas_giant,
- * so no starmap_body_t field is added and the ctypes mirror stays stable. Pure
- * (seed,idx) hash, no RNG-stream draws, so topology/ETA rolls and host==device
- * are untouched. A moon inherits its parent planet's heliocentric distance, so a
- * habitable moon of a band gas giant reads LV — the LV-426/Calpamos shape.
+/* Life-viability for the LV designation. RETIRED FROM THE LIVE PATH: a conforming
+ * token pins its destination by prefix, so this predicate now feeds only the
+ * malformed-token fallback (starmap_designation). A major rocky body (moon or
+ * planet) in the temperate habitable band. Derived (not stored) — mirrors
+ * sw_is_gas_giant, so no starmap_body_t field is added and the ctypes mirror stays
+ * stable. Pure (seed,idx) hash, no RNG-stream draws, so topology/ETA rolls and
+ * host==device are untouched. A moon inherits its parent planet's heliocentric
+ * distance, so a habitable moon of a band gas giant reads LV — the LV-426/Calpamos
+ * shape.
  *
  * Habitable band (wu): the temperate annulus where a rocky world can be life-
  * viable. Tunable; first-pass excludes scorching-inner and frozen/gas-giant-outer
@@ -168,6 +231,20 @@ static bool sw_is_life_viable(uint32_t seed, const starmap_system_t *sys, int id
               : b->orbital_radius;
     if (r < SW_HZ_MIN || r > SW_HZ_MAX) return false;       /* must be in the temperate band */
     return (sw_hash2(seed ^ SW_SALT_VIABLE, idx) & 1u) != 0;/* roll so in-zone worlds vary → some BG */
+}
+
+/* Colony status for the destination's DOCKED/LANDED label (route_anim) and the host
+ * CLI's colony/unpopulated annotation (route_explain). A gas giant always reads
+ * colony — the orbital docks ride its rings — while every other body is settled 70%
+ * of the time. The 70/30 split is a salted (seed,idx) hash, so the same token always
+ * reports the same status and the host matches the device. Pure hash like
+ * sw_is_gas_giant / starmap_designation (no RNG-stream draws), so topology/ETA rolls
+ * are untouched and no starmap_body_t field is added (the ctypes mirror stays stable). */
+#define SW_SALT_COLONY 0xC0107A11u  /* distinct from designation / gas-giant / viable / class salts */
+
+bool starmap_is_colony(uint32_t seed, const starmap_system_t *sys, int idx) {
+    if (sw_is_gas_giant(seed, &sys->bodies[idx], idx)) return true;
+    return (sw_hash2(seed ^ SW_SALT_COLONY, idx) % 100u) < 70u;
 }
 
 /* "PP-N…" — two-letter prefix, dash, serial with no leading zeros. The longest
@@ -246,12 +323,111 @@ void starmap_spectral_class(uint32_t seed, const starmap_body_t *body, int idx,
     out[2] = '\0';
 }
 
+/* ── Destination pinning (seed-is-designation) ───────────────────────────────
+ * After the ambient world is generated, select — or, if absent, construct — a
+ * destination body whose type matches the token's prefix, and return its index.
+ * The prefix→type contract:
+ *   RF → trojan or vagrant          KG → gas-giant planet
+ *   LV → moon or rocky planet       BG → moon or rocky planet  (LV/BG share a pool)
+ * Rock-vs-moon variety for LV/BG falls out of the candidate selection; when no
+ * candidate exists, construction defaults to the always-possible moon (LV/BG), a
+ * vagrant (RF), or a promotion of the outermost planet to a guaranteed gas giant
+ * (KG). The selection/construction draws from `rng`, so the choice is deterministic
+ * for a given token. */
+static bool sw_is_dest_candidate(uint32_t seed, const starmap_body_t *b, int idx,
+                                 sw_prefix_t p) {
+    switch (p) {
+        case SW_PFX_RF:
+            return b->type == STARMAP_TROJAN || b->type == STARMAP_VAGRANT;
+        case SW_PFX_KG:
+            return b->type == STARMAP_PLANET && sw_is_gas_giant(seed, b, idx);
+        case SW_PFX_LV:
+        case SW_PFX_BG:
+        default:
+            return b->type == STARMAP_MOON ||
+                   (b->type == STARMAP_PLANET && !sw_is_gas_giant(seed, b, idx));
+    }
+}
+
+static int sw_pin_destination(starmap_rng_t *rng, starmap_system_t *out, sw_prefix_t p) {
+    /* Prefer an existing matching body (deterministic pick from the pool). */
+    int cand[STARMAP_MAX_BODIES];
+    int n = 0;
+    for (int i = 0; i < out->body_count; i++) {
+        if (sw_is_dest_candidate(out->seed, &out->bodies[i], i, p)) cand[n++] = i;
+    }
+    if (n > 0) return cand[starmap_rng_range(rng, 0, n - 1)];
+
+    int outermost = out->planet_idx[out->planet_count - 1];
+
+    switch (p) {
+        case SW_PFX_KG: {
+            /* No gas giant exists: promote the outermost planet to a guaranteed one
+             * (r ≥ HI). It stays outermost, so planet_idx ascending order holds and
+             * no new slot is needed. */
+            if (out->bodies[outermost].orbital_radius < SW_GAS_GIANT_R_HI)
+                out->bodies[outermost].orbital_radius = SW_GAS_GIANT_R_HI;
+            return outermost;
+        }
+        case SW_PFX_RF: {
+            /* Append a vagrant beyond the outermost orbit (the vagrant block). */
+            if (out->body_count < STARMAP_MAX_BODIES) {
+                float outer_r = out->bodies[outermost].orbital_radius;
+                starmap_body_t *b = &out->bodies[out->body_count];
+                b->type           = STARMAP_VAGRANT;
+                b->parent_idx     = 0xFF;
+                b->orbital_radius = outer_r * (SW_VAGRANT_R_MIN_MUL
+                                    + starmap_rng_float(rng) * SW_VAGRANT_R_SPAN_MUL);
+                b->angle          = starmap_rng_float(rng) * SW_TWO_PI;
+                return out->body_count++;
+            }
+            break;
+        }
+        case SW_PFX_LV:
+        case SW_PFX_BG:
+        default: {
+            /* Append a moon to a planet that has none yet (preserving the ≤1-moon-
+             * per-planet invariant the local-frame router relies on); fall back to
+             * any planet if all already have a moon. Reachable only when no moon and
+             * no rocky planet exist, so the fallback never actually fires. */
+            if (out->body_count < STARMAP_MAX_BODIES) {
+                int host = -1;
+                for (int i = 0; i < out->planet_count; i++) {
+                    int pidx = out->planet_idx[i];
+                    bool has_moon = false;
+                    for (int j = 0; j < out->body_count; j++) {
+                        if (out->bodies[j].type == STARMAP_MOON &&
+                            out->bodies[j].parent_idx == pidx) { has_moon = true; break; }
+                    }
+                    if (!has_moon) { host = pidx; break; }
+                }
+                if (host < 0) host = out->planet_idx[0];
+                starmap_body_t *b = &out->bodies[out->body_count];
+                b->type           = STARMAP_MOON;
+                b->parent_idx     = (uint8_t)host;
+                b->orbital_radius = SW_MOON_R_MIN + starmap_rng_float(rng) * SW_MOON_R_SPAN;
+                b->angle          = starmap_rng_float(rng) * SW_TWO_PI;
+                return out->body_count++;
+            }
+            break;
+        }
+    }
+
+    /* Pathological overflow (≥16 bodies already): return any existing body so the
+     * route still renders. */
+    return 0;
+}
+
 /* ── System build (single source of truth) ───────────────────────────────────── */
 void starmap_build(const char *designation, starmap_system_t *out) {
     memset(out, 0, sizeof(*out));
+    sw_token_t tk = sw_parse_token(designation);
 
+    /* Seed from the CANONICAL text when conforming, so "lv-426" and "LV-426" hash
+     * to the same world — the designation is a case-insensitive bookmark. A
+     * malformed token seeds from its raw string (legacy). */
     starmap_rng_t rng;
-    rng.state = starmap_seed(designation);
+    rng.state = starmap_seed(tk.ok ? tk.text : designation);
     out->seed = rng.state;
 
     /* Proper name first so it doesn't depend on how many bodies spawn. */
@@ -323,13 +499,25 @@ void starmap_build(const char *designation, starmap_system_t *out) {
      * Any two distinct non-star bodies. The star is never an endpoint (it isn't
      * in bodies[]); every planet, moon, trojan and vagrant is fair game, in
      * either direction. */
-    out->depart_idx = (uint8_t)starmap_rng_range(&rng, 0, out->body_count - 1);
-    int dst = starmap_rng_range(&rng, 0, out->body_count - 2);
-    if (dst >= out->depart_idx) dst++;   /* keep it distinct from departure */
-    out->dest_idx = (uint8_t)dst;
-
-    /* Designation is a derived label of the destination body's properties, not the
-     * seed token — see starmap_designation. Pass the system so a moon's life-
-     * viability can read its parent planet's heliocentric distance. */
-    starmap_designation(out->seed, out, out->dest_idx, out->designation);
+    if (tk.ok) {
+        /* Pinned path: the destination is fixed by the prefix; the DEPARTURE is the
+         * random-distinct one (consistent with the local-frame feature's "depart
+         * stays random"). The designation IS the token, echoed verbatim. */
+        out->dest_idx = (uint8_t)sw_pin_destination(&rng, out, tk.prefix);
+        int dep = starmap_rng_range(&rng, 0, out->body_count - 2);
+        if (dep >= out->dest_idx) dep++;   /* keep it distinct from the destination */
+        out->depart_idx = (uint8_t)dep;
+        int i = 0;
+        for (; tk.text[i] && i < STARMAP_DESIG_LEN - 1; i++) out->designation[i] = tk.text[i];
+        out->designation[i] = '\0';
+    } else {
+        /* Malformed token: legacy path — random endpoints, then a designation
+         * derived from the destination body's properties (see starmap_designation;
+         * pass the system so a moon's life-viability can read its parent's distance). */
+        out->depart_idx = (uint8_t)starmap_rng_range(&rng, 0, out->body_count - 1);
+        int dst = starmap_rng_range(&rng, 0, out->body_count - 2);
+        if (dst >= out->depart_idx) dst++;   /* keep it distinct from departure */
+        out->dest_idx = (uint8_t)dst;
+        starmap_designation(out->seed, out, out->dest_idx, out->designation);
+    }
 }

@@ -45,13 +45,13 @@ MU-TH-UR-style CRT readout, not a literal space sim.
 The keymap already routes custom keycodes through `process_record_user`; a dedicated layer can host these
 without disturbing typing. State lives on the master (`g_journey`); the slave only renders synced telemetry.
 
-- Go to a named system — freeform designation entry (M–L) — an entry mode on a dedicated layer to type a
-  token (e.g. `LV-426`) and lock it in, seeding that exact deterministic system via `route_gen_build`.
-  **Design wrinkle:** the entered token only _seeds_ the world (djb2 → LCG); the displayed designation is
-  _class-derived_, so typing `LV-426` won't necessarily display `LV-426`. To make "go to LV-426" actually
-  show LV-426, either (a) accept it as a seed and show whatever class-designation results (simple, honest),
-  or (b) search for / table a seed whose derived designation matches the input (true "go-to", more work).
-  Also needs an on-OLED prompt + cursor affordance (the heavier part vs. a curated cycle).
+- Go to a named system — freeform designation entry (M–L) — **half-built.** The seed-is-designation half is
+  done: typing `LV-426` now returns to that exact deterministic system _and_ lands on an `LV`-type world,
+  every time. The old **design wrinkle** (the entered token only _seeds_ the world, so a class-derived label
+  could disagree with what was typed) is resolved by inverting the contract — the designation _is_ the
+  token (see "Seed-is-designation — as built" below). **Still unbuilt:** the on-OLED entry mode itself — a
+  dedicated layer to type a token and lock it in, with a prompt + cursor affordance. The auto-cycler still
+  drives the destination today.
 - Set trip duration → journey scaled to it (S–M) — a key sets a target wall-clock journey length; the whole
   DEPART→ARRIVE timeline scales to it (ship progress, the ETA readout, and burn windows all derive from
   `duration_ms`). **Design wrinkle:** burn windows are currently _absolute_ real-time spans
@@ -189,3 +189,70 @@ reads `LV` (the LV-426/Calpamos shape).
   [`.claude/docs/world-classification.md`](world-classification.md).
 - **Code:** `sw_is_life_viable` + `SW_HZ_*`/`SW_SALT_VIABLE` and the rewritten `starmap_designation`
   (`starmap_world.c` / `.h`); property-aware designation tests in `preview/test_route.py`.
+
+## Frame-aware path-finding — as built
+
+A trip from a planet to its **own moon** is now planned in that planet's **local frame** instead of the
+heliocentric one, so the route stays at the moon's orbital scale (~a few wu around the host planet) and the
+best-fit framing zooms into a clean local view. This fixes the old illegible loop where the ship flew out to
+a planet's star-relative L4, coasted 120° around the star to L5, and returned to the moon (~336 wu to reach a
+~6 wu destination — the BG-794 / LV-100 case). Interplanetary trips keep their heliocentric frame.
+
+- **One classifier, two frames.** `rg_plan` (`route_gen.c`) checks whether the endpoints are a planet and
+  its own moon — the **only** intra-subsystem pair, since moons are the only non-star body and there is ≤1
+  per planet. If so it routes in the host planet's frame: the pivot whose Lagrange points the flyby/coast
+  threads is the **moon**, the frame center the route bows around is the **host planet**, and the coast is
+  centered there at the moon's orbital radius. Otherwise it routes heliocentrically (pivot = a mid-planet,
+  center = the star). Full trip→frame taxonomy, and why planet↔own-moon is the only local case:
+  [`route-frames.md`](route-frames.md).
+- **Parent-relative Lagrange points.** `starmap_lagrange_pos` (`starmap_world.c`) now centers a body's
+  L-points on its **parent** — a planet's parent is the star (origin → heliocentric, a no-op vs. before), a
+  moon's parent is its planet (→ planet-local, moon-scale). One function serves both frames.
+- **The coast carries its own center.** `rg_leg_t` gained a `center` field (`route_gen.c`); the coast arc is
+  measured and packed about it instead of being hardcoded to the star, so it can express a small
+  planet-local arc. A heliocentric coast has `center = (0,0)`, so its packed geometry is byte-identical to
+  before. Transfers bow about the frame center too (`rg_transfer_control` takes it), so a local hop curves
+  around the planet, not the distant star.
+- **Sensible heliocentric intermediary.** The heliocentric mid-planet is picked from the interior planets
+  **excluding** the depart/dest planets and biased to orbit **between** them (`rg_pick_mid_planet`), so an
+  interplanetary coast/flyby never threads an endpoint's own orbit ring — the heliocentric twin of the
+  planet↔moon loop.
+- **Code:** parent-relative `starmap_lagrange_pos` (`starmap_world.c` / `.h`); frame classification, coast
+  `center`, in-frame `rg_transfer_control`, and `rg_pick_mid_planet` (`route_gen.c`); local-route
+  world-scale invariants + the LV-100 ETA regression in `preview/test_route.py`. No `gfx_route_t` /
+  ctypes-mirror change (only internal `rg_leg_t` / `rg_plan_t` fields and a same-signature
+  `starmap_lagrange_pos`).
+
+## Seed-is-designation — as built
+
+The seed token now **is** the destination. A conforming `{PREFIX}-{digits}` token (PREFIX ∈
+`LV`/`BG`/`KG`/`RF`, case-insensitive) is echoed verbatim as the displayed designation, and its prefix pins
+the destination body's **type**, so typing `LV-426` returns to the same deterministic system every time
+_and_ lands on an `LV`-type world. This inverts the previous contract (token seeds the world; label derived
+from the destination's class), resolving the "go to a named system" design wrinkle — the displayed
+designation can't disagree with what was typed, because it _is_ what was typed.
+
+- **Parser.** `sw_parse_token` (`starmap_world.c`) matches `{LV,BG,KG,RF}-{1..4 digits}`, normalizes to
+  upper, and copies the serial verbatim (never interpreted numerically). The world is seeded from the
+  canonical text, so `lv-426` and `LV-426` bookmark the same system. A malformed token falls back to the
+  legacy derived-designation path, unchanged.
+- **Generate-then-pin.** The tested world generator runs untouched; `sw_pin_destination`
+  (`starmap_world.c`) then selects a destination body of the prefix's type — `RF` → trojan/vagrant, `KG` →
+  gas-giant planet, `LV`/`BG` → moon or rocky planet — or constructs one if the world lacks it (append a
+  vagrant or a moon, or promote the outermost planet to a guaranteed gas giant). The **departure** becomes
+  the random-distinct endpoint (the destination is now fixed), consistent with the local-frame feature's
+  "depart stays random." Rock-vs-moon variety for `LV`/`BG` falls out of the candidate pool.
+- **`LV` vs `BG` is cosmetic** — both pin the same body pool and the type-keyed spectral class can't tell
+  them apart, so the habitable-band / viability model (`sw_is_life_viable`) is retired to the
+  malformed-token fallback only. Full contract: [`world-classification.md`](world-classification.md).
+- **Auto-cycler emits valid tokens.** `ra_next_seed_token` (`route_anim.c`) now formats a weighted
+  `{PREFIX}-{serial}` from the advanced LCG (16/32/32/20 split — `LV` the rare jackpot, `RF` the minority;
+  serial bands match the catalog), so the endless run still produces well-formed designations.
+- **Out of scope:** the on-OLED freeform _entry UI_ (typing a token live on the keyboard) — the other half
+  of the "go to a named system" roadmap item.
+- **Code:** `sw_parse_token` / `sw_pin_destination` / rewritten `starmap_build` and retired-to-fallback
+  `starmap_designation` (`starmap_world.c` / `.h`); token-emitting `ra_next_seed_token` (`route_anim.c`);
+  inverted designation invariants + multi-prefix sweep + discovered planet↔moon anchor + malformed-fallback
+  / body-budget tests (`preview/test_route.py`). No `gfx_route_t` / `starmap_system_t` field added
+  (construction appends into the already-mirrored `bodies[16]`), so the ctypes `sizeof` asserts are
+  untouched.

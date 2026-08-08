@@ -29,5 +29,6 @@
 
 #define COMBO_TERM 50          // gaming-toggle chord window (ms)
 
-#define PLOOPY_DRAGSCROLL_DIVISOR_H 32.0
+#define PLOOPY_DRAGSCROLL_DIVISOR_H -32.0   // negative inverts H to match the
+                                             // already-inverted V axis (POINTING_DEVICE_INVERT_Y)
 #define PLOOPY_DRAGSCROLL_DIVISOR_V 32.0

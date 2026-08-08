@@ -19,6 +19,7 @@
 
 enum layers { _BASE = 0, _FN, _GAME };
 enum custom_keycodes { DPI_MIN = SAFE_RANGE, DPI_LOMID, DPI_HIMID, DPI_MAX };
+enum tap_dances { TD_DRAG_SCROLL };
 
 // Settle window: zero cursor motion this long after a left OR right press.
 // Kept in EVERY mode — for aiming a brief freeze beats a cursor hop (gaming is
@@ -32,20 +33,42 @@ static bool     settle_held  = false;
 static uint32_t settle_timer = 0;
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
-    //                 top-outer-L   top-inner-L  top-inner-R  top-outer-R  bottom-L  bottom-R
-    [_BASE] = LAYOUT(  LALT(KC_TAB), OSL(_FN),    DRAG_SCROLL, MS_BTN2,     MS_BTN1,  MS_BTN3 ),
-    [_FN]   = LAYOUT(  DPI_MIN,      DPI_LOMID,   DPI_HIMID,   DPI_MAX,     _______,  _______ ),
-    [_GAME] = LAYOUT(  KC_F13,       KC_F14,      KC_F15,      _______,     _______,  _______ ),
+    //                 top-outer-L   top-inner-L  top-inner-R          top-outer-R  bottom-L  bottom-R
+    [_BASE] = LAYOUT(  LALT(KC_TAB), OSL(_FN),    TD(TD_DRAG_SCROLL),  MS_BTN2,     MS_BTN1,  MS_BTN3 ),
+    [_FN]   = LAYOUT(  DPI_MIN,      DPI_LOMID,   DPI_HIMID,           DPI_MAX,     _______,  _______ ),
+    [_GAME] = LAYOUT(  MS_BTN4,      MS_BTN5,     KC_INS,              _______,     _______,  _______ ),
 };
 
 // Same physical chord (top-outer-left + top-inner-right) toggles gaming both
-// ways: ⌥Tab+Drag on Base, F13+F15 on Gaming.
+// ways: ⌥Tab+Drag on Base, M4+Insert on Gaming.
 enum combos { CMB_GAME_ON, CMB_GAME_OFF };
-const uint16_t PROGMEM game_on_combo[]  = {LALT(KC_TAB), DRAG_SCROLL, COMBO_END};
-const uint16_t PROGMEM game_off_combo[] = {KC_F13, KC_F15, COMBO_END};
+const uint16_t PROGMEM game_on_combo[]  = {LALT(KC_TAB), TD(TD_DRAG_SCROLL), COMBO_END};
+const uint16_t PROGMEM game_off_combo[] = {MS_BTN4, KC_INS, COMBO_END};
 combo_t key_combos[] = {
     [CMB_GAME_ON]  = COMBO(game_on_combo,  TG(_GAME)),
     [CMB_GAME_OFF] = COMBO(game_off_combo, TG(_GAME)),
+};
+
+// Drag-scroll axis mode: single tap enters scroll mode with H+V inverted (matches
+// POINTING_DEVICE_INVERT_Y and PLOOPY_DRAGSCROLL_DIVISOR_H's sign in config.h).
+// Double tap enters scroll mode with H+V normal (raw sensor direction). Repeating
+// the gesture that matches the currently active mode turns scroll off; the other
+// gesture switches the active mode in place rather than stacking a third state.
+extern bool is_drag_scroll;
+static bool drag_scroll_normal = false;
+
+void dragscroll_dance_finished(tap_dance_state_t *state, void *user_data) {
+    bool want_normal = state->count >= 2;
+    if (is_drag_scroll && drag_scroll_normal == want_normal) {
+        is_drag_scroll = false;
+    } else {
+        is_drag_scroll     = true;
+        drag_scroll_normal = want_normal;
+    }
+}
+
+tap_dance_action_t tap_dance_actions[] = {
+    [TD_DRAG_SCROLL] = ACTION_TAP_DANCE_FN_ADVANCED(NULL, dragscroll_dance_finished, NULL),
 };
 
 // Discrete "set DPI to X": write the index, persist, apply. Reuses the board's
@@ -78,6 +101,14 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
     if (settle_held && timer_elapsed32(settle_timer) < LCLICK_SETTLE_MS) {
         mouse_report.x = 0;
         mouse_report.y = 0;
+    }
+    // Normal-mode drag-scroll: negate both axes here, before ploopyco.c's kb-level
+    // accumulation runs. That cancels PLOOPY_DRAGSCROLL_DIVISOR_H's negative sign and
+    // POINTING_DEVICE_INVERT_Y's flip, so the scroll direction matches raw sensor
+    // motion instead of the inverted default (see dragscroll_dance_finished above).
+    if (is_drag_scroll && drag_scroll_normal) {
+        mouse_report.x = -mouse_report.x;
+        mouse_report.y = -mouse_report.y;
     }
     return mouse_report;
 }

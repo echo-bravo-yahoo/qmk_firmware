@@ -17,6 +17,8 @@ Currently visualized:
 - `crkbd/rev1 aeby` — `keyboards/crkbd/keymaps/aeby/keymap.svg`
 - `ploopyco/madromys aeby` — `keyboards/ploopyco/madromys/keymaps/aeby/keymap.svg`
 
+All visualized devices are also linked in `keymap-previews.html` (Devices group). When adding a new device, append `{ label: '…', src: 'keyboards/<path>/keymap.svg' }` to the second group's `items` array in `keymap-previews.html`.
+
 Adding a new keymap: extend the `layer_names_for` lookup in `scripts/draw-keymap.sh`, then bootstrap + draw. Custom hold/tap legends, modifier glyphs, and keycode display strings go in `keymap_drawer.config.yaml` (never in the parsed `keymap.yaml` — those edits are wiped on re-bootstrap).
 
 Detailed reference: `~/notes/20-29 digital/22 esoteric-input-devices/22.01 qmk/keymap-drawer.md`.
@@ -32,6 +34,7 @@ Files involved:
 - `games/<game>.html` — side-by-side wrapper.
 - `layouts/mouse.json` — reusable stylized mouse "keyboard" (thumb buttons + L / scroll-wheel / R). Reference from any mouse YAML via `layout: { qmk_info_json: layouts/mouse.json }`.
 - `scripts/draw-game.sh <yaml>` — renders one YAML to a sibling `.svg`.
+- `keymap-previews.html` (repo root) — tab index; lists all game HTML wrappers and device keymap SVGs.
 
 To add a new game (`<game>` placeholder for a slug like `marathon`, `<kb>` for the QMK keyboard slug like `crkbd`):
 
@@ -51,8 +54,9 @@ To add a new game (`<game>` placeholder for a slug like `marathon`, `<kb>` for t
    ```bash
    ./scripts/draw-game.sh games/<game>.<kb>.yaml
    ./scripts/draw-game.sh games/<game>.mouse.yaml
-   open -a Firefox games/<game>.html
+   open -a Firefox keymap-previews.html
    ```
+   Add `{ label: '<Game Name>', src: 'games/<game>.html' }` to the first group's `items` array in `keymap-previews.html`.
 6. Iterate. Both YAMLs are hand-authored — changing a label only requires editing the YAML and re-running `draw-game.sh` on it.
 
 The label-customization in `keymap_drawer.config.yaml` (modifier glyphs, custom keycode names) doesn't apply to game YAMLs since those entries are plain strings, not QMK keycodes — labels render verbatim.

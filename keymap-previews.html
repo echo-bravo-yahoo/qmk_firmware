@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cheat sheets</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #fafafa; color: #222; display: flex; flex-direction: column; height: 100dvh; }
+  nav { display: flex; align-items: flex-end; gap: 0.25rem; padding: 0.5rem 0.75rem 0; background: #eee; border-bottom: 2px solid #ccc; flex-wrap: wrap; }
+  button { padding: 0.4rem 1rem; border: 1px solid #ccc; border-bottom: none; border-radius: 4px 4px 0 0; background: #ddd; cursor: pointer; font: inherit; color: inherit; }
+  button.active { background: #fafafa; border-bottom: 2px solid #fafafa; margin-bottom: -2px; }
+  .sep { width: 1px; background: #bbb; height: 1.5rem; margin: 0 0.25rem; align-self: center; }
+  .frames { flex: 1; position: relative; }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; display: none; }
+  iframe.active { display: block; }
+</style>
+</head>
+<body>
+<nav id="tabs"></nav>
+<div class="frames" id="frames"></div>
+<script>
+  const groups = [
+    {
+      items: [
+        { label: 'Marathon', src: 'games/marathon.html' },
+      ],
+    },
+    {
+      items: [
+        { label: 'Corne',            src: 'keyboards/crkbd/keymaps/aeby/keymap.svg' },
+        { label: 'Ploopy Adept',     src: 'keyboards/ploopyco/madromys/keymaps/aeby/keymap.svg' },
+        { label: 'Killer Whale duo', src: 'keyboards/tarohayashi/killerwhale/duo/keymaps/aeby/keymap.svg' },
+      ],
+    },
+  ];
+
+  const nav       = document.getElementById('tabs');
+  const container = document.getElementById('frames');
+  const buttons   = [];
+  const frames    = [];
+
+  groups.forEach(({ items }, gi) => {
+    if (gi > 0) {
+      const sep = document.createElement('div');
+      sep.className = 'sep';
+      nav.appendChild(sep);
+    }
+    items.forEach(({ label, src }) => {
+      const idx = frames.length;
+
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.onclick = () => activate(idx);
+      nav.appendChild(b);
+      buttons.push(b);
+
+      const f = document.createElement('iframe');
+      f.src = src;
+      container.appendChild(f);
+      frames.push(f);
+    });
+  });
+
+  function activate(i) {
+    buttons.forEach((b, j) => b.classList.toggle('active', i === j));
+    frames.forEach((f, j) => f.classList.toggle('active', i === j));
+  }
+
+  activate(0);
+</script>
+</body>
+</html>

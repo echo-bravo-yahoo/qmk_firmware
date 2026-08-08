@@ -6,7 +6,7 @@ Compiles oled_gfx.c + route_gen.c + starmap_world.c into oled_gfx.so (with
 Python. Auto-rebuilds when any source is newer than the .so, so the preview and
 tests always exercise the real firmware code — the single source of truth.
 """
-import ctypes, os, subprocess
+import ctypes, math, os, subprocess
 from PIL import Image
 
 _DIR    = os.path.dirname(os.path.abspath(__file__))
@@ -80,6 +80,9 @@ class _StarmapSystem(ctypes.Structure):
 L1, L2, L3, L4, L5 = 0, 1, 2, 3, 4
 STARMAP_PLANET, STARMAP_MOON, STARMAP_TROJAN, STARMAP_VAGRANT = 0, 1, 2, 3
 
+# Route topologies (match the RG_* enum in route_gen.c).
+RG_DIRECT, RG_FLYBY, RG_COAST = 0, 1, 2
+
 
 class _GfxRoute(ctypes.Structure):
     _fields_ = [
@@ -99,13 +102,18 @@ class _GfxRoute(ctypes.Structure):
         ('eta_minutes',    ctypes.c_uint16),
         ('system_name',    ctypes.c_char * 12),
         ('designation',    ctypes.c_char * 8),
-        # Space-filling banner (append-only — see oled_gfx.h).
+        # Telemetry strip (append-only — see oled_gfx.h).
         ('dest_class',     ctypes.c_char * 4),
         ('banner_x',       ctypes.c_uint8),
         ('banner_w',       ctypes.c_uint8),
+        ('origin',         ctypes.c_char * 8),
+        ('is_colony',      ctypes.c_uint8),   # destination DOCKED(1)/LANDED(0)
     ]
 
 # Journey state machine (route_anim.h). Mirrors route_journey_t / route_telemetry_t.
+
+# Journey states (match the RA_* enum in route_anim.h).
+RA_CONTROL, RA_MISSION, RA_COMPLETE = 0, 1, 2
 
 class _RouteJourney(ctypes.Structure):
     _fields_ = [
@@ -116,6 +124,13 @@ class _RouteJourney(ctypes.Structure):
         ('dest_rng',    ctypes.c_uint32),
         ('cur_t',       ctypes.c_float),
         ('active',      ctypes.c_bool),
+        # Three-state mission loop (append-only — keeps this mirror stable).
+        ('state',       ctypes.c_uint8),
+        ('fx_event',    ctypes.c_uint8),
+        ('fx_start_ms', ctypes.c_uint32),
+        ('tok',         ctypes.c_char * 8),
+        ('tok_len',     ctypes.c_uint8),
+        ('tok_entry',   ctypes.c_bool),
     ]
 
 class _RouteTelemetry(ctypes.Structure):
@@ -126,6 +141,21 @@ class _RouteTelemetry(ctypes.Structure):
         ('phase',             ctypes.c_uint8),
         ('burn',              ctypes.c_uint8),
         ('gaming',            ctypes.c_uint8),
+        ('state',             ctypes.c_uint8),
+        ('is_colony',         ctypes.c_uint8),
+    ]
+
+# Host-only explain hook (mirrors route_explain_t in route_gen.h).
+class _RouteExplain(ctypes.Structure):
+    _fields_ = [
+        ('topology',       ctypes.c_uint8),
+        ('eta_minutes',    ctypes.c_uint16),
+        ('leg_count',      ctypes.c_uint8),
+        ('depart_type',    ctypes.c_uint8),
+        ('dest_type',      ctypes.c_uint8),
+        ('pivot_type',     ctypes.c_uint8),
+        ('flyby_lagrange', ctypes.c_int8),
+        ('pivot',          ctypes.c_char * 8),
     ]
 
 # Journey phases (match gfx_phase_t in oled_gfx.h).
@@ -137,6 +167,37 @@ PHASE_NAMES = {
     GFX_PHASE_COAST:   "COAST",
     GFX_PHASE_ARRIVE:  "ARRIVE",
 }
+
+# ── Telemetry-strip geometry (mirrors oled_gfx.h GFX_TT_ROWS / GFX_TEL_*) ──────
+GFX_TT_ROWS     = 5
+GFX_TEL_GAP     = 2
+GFX_TEL_PITCH   = GFX_TT_ROWS + GFX_TEL_GAP   # 7 px per line
+GFX_TEL_MAP_GAP = 2 * GFX_TEL_PITCH           # guaranteed map↔strip breather (2 lines)
+GFX_TEL_CHIP_PAD = 1                          # inverse-label border / reserved high-x edge
+GFX_TEL_NFIELDS = 5
+# Field ids 0 DST, 1 ORG, 2 ETA, 3 STATUS, 4 SYS; ETA + STATUS values are per-frame.
+GFX_TEL_LABEL   = ["DST", "ORG", "ETA", "STATUS", "SYS"]
+GFX_TEL_DYNAMIC = (2, 3)
+# GFX_TEL_ORDER[n][slot] = field id top→bottom for an n-field strip (mirrors oled_gfx.c).
+GFX_TEL_ORDER   = [[], [0], [1, 0], [1, 0, 2], [4, 1, 0, 2], [4, 1, 0, 2, 3]]
+
+
+def tel_nfields(bw):
+    """Fields a bw-wide strip holds (mirrors gfx_tel_nfields)."""
+    if not bw:
+        return 0
+    return min(((bw + GFX_TEL_GAP) // GFX_TEL_PITCH) // 2, GFX_TEL_NFIELDS)
+
+
+def tel_line_x(bx, bw, line):
+    """Long-axis left-x of strip line `line`, 0 = top = high-x (mirrors gfx_tel_line_x)."""
+    return bx + bw - GFX_TT_ROWS - line * GFX_TEL_PITCH
+
+
+def tel_field_slot(n, fid):
+    """Top→bottom slot of field `fid` in an n-field strip, or -1 (mirrors gfx_tel_field_slot)."""
+    order = GFX_TEL_ORDER[n] if 0 <= n <= GFX_TEL_NFIELDS else []
+    return order.index(fid) if fid in order else -1
 
 # ── Build / load ──────────────────────────────────────────────────────────────
 
@@ -169,6 +230,8 @@ def _get_lib():
         lib.route_gen_build.restype       = None
         lib.route_gen_describe.argtypes    = [ctypes.c_char_p]
         lib.route_gen_describe.restype     = None
+        lib.route_gen_explain.argtypes     = [ctypes.c_char_p, ctypes.POINTER(_RouteExplain)]
+        lib.route_gen_explain.restype      = None
         lib.gfx_route_bake_bg.argtypes     = [ctypes.POINTER(_GfxRoute), ctypes.c_char_p]
         lib.gfx_route_bake_bg.restype      = None
         lib.gfx_route_bake_ship.argtypes   = [ctypes.POINTER(_GfxRoute), ctypes.c_float,
@@ -210,6 +273,14 @@ def _get_lib():
         lib.route_anim_fill_telemetry.restype = None
         lib.route_anim_reroll.argtypes        = [ctypes.POINTER(_RouteJourney)]
         lib.route_anim_reroll.restype         = None
+        lib.route_anim_launch.argtypes        = [ctypes.POINTER(_RouteJourney)]
+        lib.route_anim_launch.restype         = None
+        lib.route_anim_back.argtypes          = [ctypes.POINTER(_RouteJourney)]
+        lib.route_anim_back.restype           = None
+        lib.route_anim_adjust_eta.argtypes    = [ctypes.POINTER(_RouteJourney), ctypes.c_int]
+        lib.route_anim_adjust_eta.restype     = None
+        lib.route_anim_set_token.argtypes     = [ctypes.POINTER(_RouteJourney), ctypes.c_char_p]
+        lib.route_anim_set_token.restype      = None
         lib.route_journey_sizeof.argtypes     = []
         lib.route_journey_sizeof.restype      = ctypes.c_uint32
         lib.route_telemetry_sizeof.argtypes   = []
@@ -220,6 +291,10 @@ def _get_lib():
         for fn in ("host_get_now_ms", "host_get_boot_counter"):
             getattr(lib, fn).argtypes = []
             getattr(lib, fn).restype  = ctypes.c_uint32
+        lib.host_panel_clear.argtypes = []
+        lib.host_panel_clear.restype  = None
+        lib.host_panel_get.argtypes   = [ctypes.c_char_p]
+        lib.host_panel_get.restype    = None
         # Verify the ctypes layout matches the C structs (catches padding drift).
         for name, py, c in (("gfx_route_t", _GfxRoute, lib.gfx_route_sizeof()),
                             ("route_journey_t", _RouteJourney, lib.route_journey_sizeof()),
@@ -255,6 +330,8 @@ def _struct_to_dict(s: _GfxRoute) -> dict:
         'dest_class': s.dest_class.decode('ascii', 'replace'),
         'banner_x': s.banner_x,
         'banner_w': s.banner_w,
+        'origin': s.origin.decode('ascii', 'replace'),
+        'is_colony': bool(s.is_colony),
     }
 
 
@@ -293,6 +370,8 @@ def _to_struct(d: dict) -> _GfxRoute:
     s.dest_class    = d.get('dest_class', '').encode('ascii', 'replace')[:3]
     s.banner_x      = d.get('banner_x', 0)
     s.banner_w      = d.get('banner_w', 0)
+    s.origin        = d.get('origin', '').encode('ascii', 'replace')[:7]
+    s.is_colony     = 1 if d.get('is_colony') else 0
     return s
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -304,9 +383,66 @@ def generate_route(designation: str) -> dict:
     return _struct_to_dict(s)
 
 
+def content_xspan(route: dict) -> tuple[int, int]:
+    """Long-axis [x0, x1] of the rendered content (orbital rings included), mirroring the
+    firmware's rg_content_xspan over the final (shifted) route — the span route_gen measures
+    to lay out the strip. Lit pixels can't stand in: dashed rings inset the lit min/max from
+    the true extent, so only this geometric span reflects the layout."""
+    lo, hi = 1e9, -1e9
+    def acc(v):
+        nonlocal lo, hi
+        lo = min(lo, v); hi = max(hi, v)
+    for a in route['arcs']:
+        c = a['cx'] if a['local_center'] else route['arc_cx']
+        acc(c - a['radius']); acc(c + a['radius'])
+    for l in route['legs']:
+        for k in range(9):
+            s = k / 8.0
+            if l['type'] == GFX_LEG_COAST:
+                lx = l['cx'] + l['arc_r'] * math.cos(l['a0'] + l['a_sweep'] * s)
+            else:
+                mt = 1.0 - s
+                lx = float(int(mt * mt * l['p0x'] + 2.0 * mt * s * l['cx'] + s * s * l['p1x']))
+            acc(lx)
+    for m in route['markers']:
+        hw = 1 if m['type'] == GFX_MARKER_BODY else 3
+        acc(m['x'] - hw); acc(m['x'] + hw)
+    for b in route['bodies']:
+        acc(b['x'] - 1); acc(b['x'] + 1)
+    return math.floor(lo), math.ceil(hi)
+
+
+def lit_xspan(route: dict) -> tuple[int, int]:
+    """On-panel [min, max] x of the rendered map content (strip suppressed) — the *visible*
+    footprint route_gen lays the strip against (mirrors rg_lit_xspan). Differs from
+    content_xspan (geometric) when an off-panel star's big rings only light a small cap."""
+    buf = bake_bg({**route, 'banner_x': 0, 'banner_w': 0})
+    xs = [x for x in range(128) if any(buf[page * 128 + x] for page in range(4))]
+    return (xs[0], xs[-1]) if xs else (0, 0)
+
+
 def describe(designation: str) -> None:
     """Print the route_gen_describe() dump (bodies, Lagrange points, legs) to stdout."""
     _get_lib().route_gen_describe(designation.encode())
+
+
+def route_explain(token: str) -> dict:
+    """Structured itinerary facts for a token via the host route_gen_explain hook:
+    topology (RG_*), ETA, leg count, the depart/dest/pivot body types (STARMAP_*),
+    the flyby L-selector (0=L1, 1=L2, -1 if not a flyby), and the named pivot body
+    (empty string for a direct hop)."""
+    e = _RouteExplain()
+    _get_lib().route_gen_explain(token.encode(), ctypes.byref(e))
+    return {
+        'topology':       e.topology,
+        'eta_minutes':    e.eta_minutes,
+        'leg_count':      e.leg_count,
+        'depart_type':    e.depart_type,
+        'dest_type':      e.dest_type,
+        'pivot_type':     e.pivot_type,
+        'flyby_lagrange': e.flyby_lagrange,
+        'pivot':          e.pivot.decode('ascii', 'replace'),
+    }
 
 
 def seed(designation: str) -> int:
@@ -436,8 +572,33 @@ def anim_render_map(j) -> None:
 
 
 def anim_reroll(j) -> None:
-    """route_anim_reroll(): jump to the next system immediately (the re-roll key)."""
+    """route_anim_reroll(): re-plot a fresh random system, held (the re-roll key)."""
     _get_lib().route_anim_reroll(ctypes.byref(j))
+
+
+def anim_launch(j) -> None:
+    """route_anim_launch(): launch the held route (Mission Control → Mid-mission)."""
+    _get_lib().route_anim_launch(ctypes.byref(j))
+
+
+def anim_back(j) -> None:
+    """route_anim_back(): from Mission Complete, plot a new mission (→ Mission Control)."""
+    _get_lib().route_anim_back(ctypes.byref(j))
+
+
+def anim_adjust_eta(j, delta_min: int) -> None:
+    """route_anim_adjust_eta(): trim the journey duration, clamped [30, 599] minutes."""
+    _get_lib().route_anim_adjust_eta(ctypes.byref(j), ctypes.c_int(int(delta_min)))
+
+
+def anim_set_token(j, token: str) -> None:
+    """route_anim_set_token(): plot an explicit designation token, held in control."""
+    _get_lib().route_anim_set_token(ctypes.byref(j), token.encode())
+
+
+def journey_state(j) -> int:
+    """The journey's state field (RA_CONTROL / RA_MISSION / RA_COMPLETE)."""
+    return j.state
 
 
 def anim_fill_telemetry(j) -> dict:
@@ -451,9 +612,24 @@ def anim_fill_telemetry(j) -> dict:
         'phase': t.phase,
         'burn': bool(t.burn),
         'gaming': t.gaming,
+        'state': t.state,
+        'is_colony': bool(t.is_colony),
     }
 
 
 def journey_route(j) -> dict:
     """The active route inside a journey, as a gfx_route_t dict."""
     return _struct_to_dict(j.route)
+
+
+def panel_clear() -> None:
+    """Reset the host live-panel capture buffer (host_qmk_shim.c)."""
+    _get_lib().host_panel_clear()
+
+
+def panel_capture() -> bytearray:
+    """The 512-byte live panel route_anim_render_map last wrote — background blit plus
+    the per-frame ship and ETA/STATUS overlay. Same SSD1306 page format as bake_bg."""
+    buf = ctypes.create_string_buffer(512)
+    _get_lib().host_panel_get(buf)
+    return bytearray(buf.raw)

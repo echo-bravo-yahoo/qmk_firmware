@@ -28,6 +28,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #  include <string.h>
 #endif
 
+// Temporary diagnostic OLED mode (KEYLOG_ENABLE; see rules.mk) -- shows readable
+// keycode names instead of the transit-map sim.
+#if defined(OLED_ENABLE) && defined(KEYLOG_ENABLE)
+#  include <stdio.h>          // snprintf for the keylog OLED line
+#endif
+
 #define TAP_A LGUI_T(KC_A)
 #define TAP_S LALT_T(KC_S)
 #define TAP_D LCTL_T(KC_D)
@@ -376,3 +382,40 @@ bool oled_task_user(void) {
 }
 
 #endif // OLED_ENABLE && STARMAP_ENABLE
+
+#if defined(OLED_ENABLE) && defined(KEYLOG_ENABLE)
+
+// Temporary diagnostic OLED mode (KEYLOG_ENABLE=yes on the make command line, mutually
+// exclusive with STARMAP_ENABLE -- see rules.mk). Shows each pressed key as a
+// get_keycode_string() name, the same "keylogger" idiom several stock split-OLED
+// keymaps ship (e.g. keyboards/lily58/lib/keylogger.c), but backed by the real
+// keycode-string decoder so homerow-mod and layer-tap keys (TAP_A, TOG_ESC, ...) show
+// correctly instead of just their base letter.
+
+oled_rotation_t oled_init_user(oled_rotation_t rotation) {
+    if (!is_keyboard_master()) {
+        return OLED_ROTATION_270;
+    }
+    return rotation;
+}
+
+static char keylog_line[9] = "";
+
+bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+    if (record->event.pressed) {
+        snprintf(keylog_line, sizeof(keylog_line), "%-8s", get_keycode_string(keycode));
+    }
+    return true;
+}
+
+bool oled_task_user(void) {
+    if (is_keyboard_master()) {
+        oled_write_ln_P(PSTR("KEYLOG"), false);
+        oled_write_ln(keylog_line, false);
+    } else {
+        oled_clear();
+    }
+    return false;
+}
+
+#endif // OLED_ENABLE && KEYLOG_ENABLE

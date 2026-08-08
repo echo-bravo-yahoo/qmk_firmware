@@ -18,6 +18,19 @@ ifeq ($(strip $(MCU)),atmega32u4)
     endif
 endif
 
+# Temporary diagnostic OLED mode: shows get_keycode_string() output for each keypress
+# instead of the transit-map sim, to visually verify homerow-mod / layer-tap keycodes
+# decode the way they're meant to. Build with `KEYLOG_ENABLE=yes` on the command line;
+# forces STARMAP_ENABLE off (must run before the ifeq below) so only one
+# oled_task_user()/process_record_user() pair gets compiled in. Not part of the
+# daily-driver build.
+KEYLOG_ENABLE ?= no
+ifeq ($(strip $(KEYLOG_ENABLE)),yes)
+    STARMAP_ENABLE = no
+    OPT_DEFS += -DKEYLOG_ENABLE
+    KEYCODE_STRING_ENABLE = yes
+endif
+
 ifeq ($(strip $(STARMAP_ENABLE)),yes)
     OPT_DEFS += -DSTARMAP_ENABLE
     SRC += oled_gfx.c

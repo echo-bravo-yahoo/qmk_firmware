@@ -3,23 +3,29 @@
  *
  * A "system" is a proper-named gas giant / star (e.g. Calpamos) with a handful
  * of planets, moons, trojans and the occasional vagrant. A journey transits the
- * USCSS Patna within that system to a destination body whose survey designation
- * is derived from its intrinsic properties — orbital role, composition and a
- * derived life-viability: a life-viable world (moon OR rocky planet in the
- * habitable band) reads "LV-NNN", a gas giant "KG-NNN", a rocky-but-not-viable
- * world "BG-NNN", a minor body (trojan/vagrant) "RF-NNNN" (see
- * starmap_designation, preview/README.md, and .claude/docs/world-classification.md).
+ * USCSS Patna within that system to a destination body.
  *
- * A seed token seeds everything deterministically (djb2): the same token always
- * yields the same bodies, the same Lagrange geometry, and the same proper name.
- * This is the single source of truth for the system — both route_gen_build() and
- * route_gen_describe() consume starmap_build().
+ * The seed token IS the designation. A conforming "{PREFIX}-{digits}" token
+ * (PREFIX ∈ LV/BG/KG/RF, case-insensitive) seeds the world AND is echoed verbatim
+ * as the displayed designation, while its prefix pins the destination's body
+ * type: LV/BG → moon or rocky planet, KG → gas giant, RF → trojan/vagrant. So
+ * typing "LV-426" returns to the same system every time and lands on an LV-type
+ * world. A malformed token falls back to the legacy path — random endpoints with
+ * a class label derived from the destination's properties (see starmap_designation,
+ * preview/README.md, and .claude/docs/world-classification.md).
+ *
+ * The token seeds everything deterministically (djb2): the same token always
+ * yields the same bodies, the same Lagrange geometry, and the same proper name
+ * ("lv-426" and "LV-426" bookmark the same world, since the canonical text is
+ * hashed). This is the single source of truth for the system — both
+ * route_gen_build() and route_gen_describe() consume starmap_build().
  *
  * Masses are fictional, so Lagrange points are stylized but geometrically
- * faithful: L4/L5 lead/trail the planet by ±60° on its orbit; L1/L2/L3 are
- * collinear with the star–planet axis (L1/L2 a fixed radial fraction inside /
- * outside the planet, L3 diametrically opposite). All geometry is heliocentric
- * with the star at the world origin (0,0).
+ * faithful: L4/L5 lead/trail the body by ±60° on its orbit; L1/L2/L3 are
+ * collinear with the parent–body axis (L1/L2 a fixed radial fraction inside /
+ * outside the body, L3 diametrically opposite). The star sits at the world origin
+ * (0,0); Lagrange points are taken about each body's parent, so a planet's are
+ * heliocentric and a moon's are planet-local (see starmap_lagrange_pos).
  */
 #pragma once
 #include <stdint.h>
@@ -90,13 +96,19 @@ static inline float starmap_rng_float(starmap_rng_t *r) {
 /* djb2 over the seed token — the deterministic seed. */
 uint32_t starmap_seed(const char *designation);
 
-/* Build the full deterministic system for a seed token. The token only seeds the
- * world (djb2 → LCG); the displayed designation is derived from the destination
- * body's properties — see starmap_designation. */
+/* Build the full deterministic system for a seed token. For a conforming
+ * "{PREFIX}-{digits}" token (PREFIX ∈ LV/BG/KG/RF, case-insensitive) the displayed
+ * designation IS the token, echoed verbatim (uppercased), and the prefix pins the
+ * destination body's type — LV/BG → moon or rocky planet, KG → gas giant, RF →
+ * trojan/vagrant — by selecting a matching body or constructing one. A malformed
+ * token seeds from its raw string and derives the designation instead (see
+ * starmap_designation). */
 void starmap_build(const char *designation, starmap_system_t *out);
 
-/* Survey designation derived from the destination body's properties — orbital
- * role, composition, and a derived life-viability (canon-grounded):
+/* Survey designation for a MALFORMED token only — for a conforming token the
+ * designation is the token verbatim (see starmap_build). Derives a class label
+ * from the randomly-chosen destination's intrinsic properties — orbital role,
+ * composition, and a derived life-viability (canon-grounded):
  *   life-viable world → "LV-NNN"  (moon OR rocky planet in the habitable band;
  *                                  serial 100–1299; LV-426 moon, LV-178/895 planets)
  *   gas-giant planet  → "KG-NNN"  (Jovian;            serial 100–999; KG-348)
@@ -112,6 +124,14 @@ void starmap_build(const char *designation, starmap_system_t *out);
  * rationale. out must hold STARMAP_DESIG_LEN bytes. */
 void starmap_designation(uint32_t seed, const starmap_system_t *sys, int idx,
                          char out[STARMAP_DESIG_LEN]);
+
+/* Colony status for the destination — true ⇒ DOCKED (a settled world / orbital
+ * dock), false ⇒ LANDED (touched down on an unpopulated body). A gas giant is
+ * always a colony; every other body is a colony 70% of the time, decided by a
+ * salted (seed,idx) hash so the same token reports the same status on host and
+ * device. Derived (not stored), like starmap_designation — keeps the ctypes mirror
+ * stable. See route_anim (DOCKED/LANDED) and route_explain (colony/unpopulated). */
+bool starmap_is_colony(uint32_t seed, const starmap_system_t *sys, int idx);
 
 /* Destination spectral class — the banner's second line. Sub-stellar bodies are
  * classified by *reflectance* spectra (not stellar OBAFGKM emission), so the class
@@ -131,7 +151,11 @@ void starmap_spectral_class(uint32_t seed, const starmap_body_t *body, int idx,
 /* World position of a body (recursively adds the parent's position). */
 void starmap_world_pos(const starmap_system_t *sys, int idx, float *x, float *y);
 
-/* World position of a planet's Lagrange point. planet_body_idx must be a
- * star-orbiting planet (parent_idx == 0xFF). */
+/* World position of an orbiting body's Lagrange point, taken about its parent.
+ * The body's orbital_radius/angle are parent-relative, so the L-points are
+ * centered on the parent's world position: a planet's parent is the star
+ * (origin → heliocentric L-points), a moon's parent is its planet (→ planet-local
+ * L-points at the moon's orbital scale). planet_body_idx names the body whose
+ * L-points are wanted (any orbiting body, not only a planet). */
 void starmap_lagrange_pos(const starmap_system_t *sys, int planet_body_idx,
                           starmap_lagrange_t which, float *x, float *y);

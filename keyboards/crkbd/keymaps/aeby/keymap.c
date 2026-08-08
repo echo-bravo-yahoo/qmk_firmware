@@ -43,9 +43,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define TOG_BSPC LT(1, KC_BSPC)
 #define TOG_ENT LT(2, KC_ENT)
 
-// Custom keycodes for the transit-map sim (see process_record_user).
+// Custom keycodes for the transit-map sim (see process_record_user). These drive the
+// player-controlled three-state mission loop (Mission Control → Mid-mission →
+// Mission Complete) on the master's left OLED.
 enum custom_keycodes {
-    RG_REROLL = SAFE_RANGE,   // abandon the current journey, jump to the next system
+    RG_REROLL = SAFE_RANGE,   // re-plot a fresh random system (held in Mission Control)
+    RG_LAUNCH,                // launch the held route (Mission Control → Mid-mission)
+    RG_BACK,                  // from Mission Complete, plot a new mission
+    RG_DUR_UP,                // trim the journey duration +30 min
+    RG_DUR_DN,                // trim the journey duration -30 min
+    RG_TOKEN,                 // begin freeform designation entry (layer 7)
 };
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
@@ -90,7 +97,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   //,-----------------------------------------------------.                    ,-----------------------------------------------------.
       _______,   KC_F1,   KC_F2,   KC_F3,   KC_F4,   KC_F5,                        KC_F6,   KC_F7,   KC_F8,   KC_F9,  KC_F10,   TG(4),
   //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
-      _______,OSM(KC_LGUI),OSM(KC_LALT),OSM(KC_LCTL),OSM(KC_LSFT),KC_F11,         KC_F12, KC_MPLY, KC_MPRV, KC_MNXT, RG_REROLL, _______,
+      _______,OSM(KC_LGUI),OSM(KC_LALT),OSM(KC_LCTL),OSM(KC_LSFT),KC_F11,         KC_F12, KC_MPLY, KC_MPRV, KC_MNXT,   TG(6), _______,
   //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
       _______, _______, _______, MS_BTN2, MS_BTN1, _______,                      _______, KC_MUTE, KC_VOLD, KC_VOLU, _______, _______,
   //|--------+--------+--------+--------+--------+--------+--------|  |--------+--------+--------+--------+--------+--------+--------|
@@ -122,12 +129,49 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   //|--------+--------+--------+--------+--------+--------+--------|  |--------+--------+--------+--------+--------+--------+--------|
                                           _______, _______, _______,    _______, _______, _______
                                       //`--------------------------'  `--------------------------'
+  ),
+
+  // Mission Control — plot a trip. RG_BACK (top-right outer) starts a new mission /
+  // exits; the left-hand cluster launches, re-rolls, trims the ETA, or enters a token.
+    [6] = LAYOUT_split_3x6_3(
+  //,-----------------------------------------------------.                    ,-----------------------------------------------------.
+      XXXXXXX, XXXXXXX,   XXXXXXX,   XXXXXXX,   XXXXXXX,   XXXXXXX,              XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, RG_BACK,
+  //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
+      XXXXXXX, RG_LAUNCH, RG_REROLL, RG_DUR_UP, RG_DUR_DN, _______,            _______, _______, _______, _______, _______, XXXXXXX,
+  //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
+      XXXXXXX, RG_TOKEN,  _______,   _______,   _______,   _______,            _______, _______, _______, _______, _______, XXXXXXX,
+  //|--------+--------+--------+--------+--------+--------+--------|  |--------+--------+--------+--------+--------+--------+--------|
+                                          _______, _______, _______,    _______, _______, _______
+                                      //`--------------------------'  `--------------------------'
+  ),
+
+  // Token Entry — type a designation. Only the valid-prefix letters (L V B G K R F)
+  // plus digits and ESC/BSPC/ENT; every key is captured by the token-entry intercept.
+    [7] = LAYOUT_split_3x6_3(
+  //,-----------------------------------------------------.                    ,-----------------------------------------------------.
+       KC_ESC,    KC_1,    KC_2,    KC_3,    KC_4,    KC_5,                         KC_6,    KC_7,    KC_8,    KC_9,    KC_0, KC_BSPC,
+  //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
+      XXXXXXX,    KC_L,    KC_V,    KC_B,    KC_G,    KC_K,                         KC_R,    KC_F, XXXXXXX, XXXXXXX,  KC_ENT, XXXXXXX,
+  //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
+      XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,                      XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,
+  //|--------+--------+--------+--------+--------+--------+--------|  |--------+--------+--------+--------+--------+--------+--------|
+                                          XXXXXXX, XXXXXXX, XXXXXXX,    XXXXXXX, XXXXXXX, XXXXXXX
+                                      //`--------------------------'  `--------------------------'
   )
 };
 
 #if defined(OLED_ENABLE) && defined(STARMAP_ENABLE)
 
-#define GAMING_LAYER 4
+// Token-entry layer (mirrors keymaps[7]); raised by RG_TOKEN, dropped on confirm/cancel.
+#define TOKEN_LAYER 7
+
+// Gaming layers blank the left OLED and disable HRM telemetry. Only layers 4 (gaming)
+// and 5 (arrow gaming) qualify — the Mission Control / Token Entry layers (6/7) are
+// also >= 4, but the transit map must stay visible there, so test the two explicitly.
+static bool is_gaming_layer(void) {
+    uint8_t hl = get_highest_layer(layer_state);
+    return hl == 4 || hl == 5;
+}
 
 // Master owns the live journey; the slave renders telemetry from a synced copy.
 static route_journey_t   g_journey;
@@ -158,19 +202,49 @@ void housekeeping_task_user(void) {
 
     route_telemetry_t pkt;
     route_anim_fill_telemetry(&g_journey, &pkt);
-    pkt.gaming = (get_highest_layer(layer_state) >= GAMING_LAYER) ? 1 : 0;
+    pkt.gaming = is_gaming_layer() ? 1 : 0;
     transaction_rpc_send(RPC_ID_USER_TELEMETRY, sizeof(pkt), &pkt);
 }
 
-// Re-roll: abandon the current journey and jump to a fresh system on demand.
-// Split key processing runs on the master, which owns g_journey; the slave picks
-// up the new route on the next telemetry sync.
+// Drive the three-state mission loop. Split key processing runs on the master, which
+// owns g_journey; the slave picks up the new state on the next telemetry sync.
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
-    if (keycode == RG_REROLL) {
-        if (record->event.pressed && is_keyboard_master()) {
-            route_anim_reroll(&g_journey);
+    if (!is_keyboard_master()) return true;
+
+    // While entering a token, every keystroke feeds the buffer editor (and is
+    // swallowed). ENTER/ESC end entry, so drop the token layer when they do.
+    if (g_journey.tok_entry) {
+        if (record->event.pressed) {
+            route_anim_token_key(&g_journey, keycode);
+            if (!g_journey.tok_entry) layer_off(TOKEN_LAYER);
         }
         return false;
+    }
+
+    switch (keycode) {
+        case RG_LAUNCH:
+            if (record->event.pressed) route_anim_launch(&g_journey);
+            return false;
+        case RG_BACK:
+            if (record->event.pressed) route_anim_back(&g_journey);
+            return false;
+        case RG_REROLL:
+            if (record->event.pressed) route_anim_reroll(&g_journey);
+            return false;
+        case RG_DUR_UP:
+            if (record->event.pressed) route_anim_adjust_eta(&g_journey, +30);
+            return false;
+        case RG_DUR_DN:
+            if (record->event.pressed) route_anim_adjust_eta(&g_journey, -30);
+            return false;
+        case RG_TOKEN:
+            if (record->event.pressed) {
+                g_journey.tok_entry = true;
+                g_journey.tok_len   = 0;
+                g_journey.tok[0]    = '\0';
+                layer_on(TOKEN_LAYER);
+            }
+            return false;
     }
     return true;
 }
@@ -196,17 +270,10 @@ static void oled_row(uint8_t row, const char *s, bool invert) {
     oled_write(line, invert);
 }
 
-// Phase word for the STATUS line — indexed by gfx_phase_t.
-static const char *const PHASE_WORDS[] = {
-    [GFX_PHASE_DEPART]  = "DEPART",
-    [GFX_PHASE_TRANSIT] = "TRANSIT",
-    [GFX_PHASE_FLYBY]   = "FLYBY",
-    [GFX_PHASE_COAST]   = "COAST",
-    [GFX_PHASE_ARRIVE]  = "ARRIVE",
-};
-
+// Phase word for the STATUS line. The table now lives in oled_gfx.c (gfx_phase_word)
+// so the master's transit-map strip and this slave panel share one source.
 static const char *phase_word(uint8_t phase) {
-    return (phase <= GFX_PHASE_ARRIVE) ? PHASE_WORDS[phase] : "TRANSIT";
+    return gfx_phase_word(phase);
 }
 
 // Big dark-on-light landscape BURN warning takes over the whole right panel while
@@ -241,6 +308,38 @@ static void render_telemetry(void) {
     eta[3] = (char)('0' + (mm / 10) % 10); eta[4] = (char)('0' + mm % 10);
     eta[5] = eta[6] = eta[7] = ' '; eta[8] = '\0';
 
+    // Mission Control: a plotted route held at departure — preview DST + ETA.
+    if (g_telemetry.state == RA_CONTROL) {
+        oled_row(3,  "MISSION", false);
+        oled_row(4,  "CONTROL", false);
+        oled_row(5,  "--------", false);
+        oled_row(6,  "DST", false);
+        oled_row(7,  g_telemetry.designation, false);
+        oled_row(8,  "--------", false);
+        oled_row(9,  "ETA", false);
+        oled_row(10, eta, false);
+        oled_row(11, "--------", false);
+        oled_row(12, "STATUS", false);
+        oled_row(13, "HELD", false);
+        for (uint8_t r = 14; r < 16; r++) oled_row(r, "", false);
+        return;
+    }
+
+    // Mission Complete: arrived — DOCKED (a colony) or LANDED (unpopulated).
+    if (g_telemetry.state == RA_COMPLETE) {
+        oled_row(3,  "MISSION", false);
+        oled_row(4,  "COMPLETE", false);
+        oled_row(5,  "--------", false);
+        oled_row(6,  "DST", false);
+        oled_row(7,  g_telemetry.designation, false);
+        oled_row(8,  "--------", false);
+        oled_row(9,  "STATUS", false);
+        oled_row(10, g_telemetry.is_colony ? "DOCKED" : "LANDED", false);
+        for (uint8_t r = 11; r < 16; r++) oled_row(r, "", false);
+        return;
+    }
+
+    // Mid-mission: the live running panel.
     oled_row(3,  "MISSION", false);
     oled_row(4,  g_telemetry.system_name, false);
     oled_row(5,  "TRANSIT", false);
@@ -258,8 +357,9 @@ static void render_telemetry(void) {
 
 bool oled_task_user(void) {
     if (is_keyboard_master()) {
-        // Left OLED goes dark on the gaming layers to signal the mode.
-        if (get_highest_layer(layer_state) >= GAMING_LAYER) {
+        // Left OLED goes dark on the gaming layers to signal the mode; the transit
+        // map (incl. Mission Control / Token Entry) stays visible otherwise.
+        if (is_gaming_layer()) {
             oled_clear();
         } else {
             route_anim_render_map(&g_journey);

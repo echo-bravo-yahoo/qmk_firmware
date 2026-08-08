@@ -21,4 +21,18 @@ void route_gen_build(const char *designation, gfx_route_t *out);
 
 #ifdef RG_HOST
 void route_gen_describe(const char *designation);
+
+/* Structured itinerary facts for route_explain.py — the same "re-run rg_plan"
+ * shape as route_gen_describe, but returning data instead of printing. The host
+ * CLI pairs this (topology, ETA, the named pivot + its type, the flyby L-selector)
+ * with the identity it pulls from route_gen_build. */
+typedef struct {
+    uint8_t  topology;          /* RG_DIRECT / RG_FLYBY / RG_COAST */
+    uint16_t eta_minutes;
+    uint8_t  leg_count;
+    uint8_t  depart_type, dest_type, pivot_type;  /* STARMAP_* ; pivot_type unused if no pivot */
+    int8_t   flyby_lagrange;    /* 0=L1, 1=L2 for flyby; -1 otherwise */
+    char     pivot[8];          /* pivot body designation, "" if none */
+} route_explain_t;
+void route_gen_explain(const char *token, route_explain_t *out);
 #endif

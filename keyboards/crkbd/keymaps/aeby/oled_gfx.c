@@ -198,11 +198,8 @@ void gfx_prim_crosshair(int16_t x, int16_t y, uint8_t size) {
  * (bit0 = top). 3 cols wide, 5 rows tall, 4px advance, 6px line. */
 extern const uint8_t *gfx_tomthumb_font(void);
 
-#define GFX_TT_FIRST  0x20
-#define GFX_TT_LAST   0x7E
-#define GFX_TT_COLS   3
-#define GFX_TT_ROWS   5
-#define GFX_TT_ADV    4   /* per-char step (3 cols + 1 spacing) */
+/* Tom Thumb cell geometry (GFX_TT_*) lives in oled_gfx.h so route_gen / route_anim
+ * can size the telemetry strip against the same font. */
 
 void gfx_prim_text(int16_t x, int16_t y, const char *s, uint8_t scale) {
     if (scale < 1) scale = 1;
@@ -225,12 +222,24 @@ void gfx_prim_text(int16_t x, int16_t y, const char *s, uint8_t scale) {
     }
 }
 
-/* Rotated 90° CCW so the column reads bottom→top, anchored at bottom-left
- * (x, y_bottom): glyph rows run along +x (≈5·scale wide), glyph cols + advance run
- * upward, successive chars stack upward. */
-void gfx_prim_text_vertical(int16_t x, int16_t y_bottom, const char *s, uint8_t scale) {
+/* Vertical column for the left-OLED banner, anchored bottom-left at (x, y_bottom).
+ * The left OLED renders at OLED_ROTATION_0 onto a panel whose buffer-left edge is
+ * the physical bottom (a 90° turn), so a naive bottom→top column would land upside
+ * down. Each pixel is therefore reflected 180° through the column's bounding-box
+ * centre, so it reads top→bottom in the buffer and upright on the panel. The anchor
+ * and bounding box are unchanged (x = left edge, y_bottom = bottom edge), so the
+ * caller's centring still holds. */
+/* Core rasterizer; `on` selects the draw color (false erases — used for black text on a
+ * filled inverse chip). gfx_prim_text_vertical is the public on=true wrapper. */
+static void gfx_prim_vtext(int16_t x, int16_t y_bottom, const char *s, uint8_t scale, bool on) {
     if (scale < 1) scale = 1;
     const uint8_t *font = gfx_tomthumb_font();
+    int len = 0; while (s[len]) len++;
+    /* Point-reflection sums (xmin+xmax, ymin+ymax) of the nominal column bbox: a lit
+     * pixel (px,py) is plotted at (xsum-px, ysum-py) → a 180° turn in place. */
+    int16_t xsum = (int16_t)(2 * x + GFX_TT_ROWS * scale - 1);
+    int16_t ysum = (int16_t)(2 * y_bottom - (len - 1) * GFX_TT_ADV * scale
+                             - (GFX_TT_COLS - 1) * scale - (scale - 1));
     for (int i = 0; s[i]; i++) {
         uint8_t c = (uint8_t)s[i];
         if (c < GFX_TT_FIRST || c > GFX_TT_LAST) continue;
@@ -241,12 +250,18 @@ void gfx_prim_text_vertical(int16_t x, int16_t y_bottom, const char *s, uint8_t 
             for (int row = 0; row < GFX_TT_ROWS; row++) {
                 if (!((bits >> row) & 1u)) continue;
                 for (int sy = 0; sy < scale; sy++)
-                    for (int sx = 0; sx < scale; sx++)
-                        gfx_prim_pixel((int16_t)(x     + row * scale + sx),
-                                       (int16_t)(cbase - col * scale - sy), true);
+                    for (int sx = 0; sx < scale; sx++) {
+                        int16_t px = (int16_t)(x     + row * scale + sx);
+                        int16_t py = (int16_t)(cbase - col * scale - sy);
+                        gfx_prim_pixel((int16_t)(xsum - px), (int16_t)(ysum - py), on);
+                    }
             }
         }
     }
+}
+
+void gfx_prim_text_vertical(int16_t x, int16_t y_bottom, const char *s, uint8_t scale) {
+    gfx_prim_vtext(x, y_bottom, s, scale, true);
 }
 
 uint8_t gfx_pulse_size(uint32_t now_ms) {
@@ -257,91 +272,113 @@ uint8_t gfx_pulse_size(uint32_t now_ms) {
     return (uint8_t)(2u + (tri * 2u) / 500u);                  /* 2, 3, 4 */
 }
 
-/* ── Space-filling banner ─────────────────────────────────────────────────────
- * route_gen reserves a strip [banner_x, banner_x+banner_w) on compact routes; this
- * fills it with the destination designation + spectral class. The tier (and so the
- * treatment) is chosen by the strip width — a slim vertical label uses the tall
- * axis, a wider strip a horizontal CRT-readout, the widest a framed 2× placard. */
-#define GFX_BANNER_VERT_MAX   29   /* ≤ this → vertical rotated label              */
-#define GFX_BANNER_HORIZ_MAX  55   /* ≤ this → horizontal 2-line readout           */
-#define GFX_BANNER_VERT_2COL  24   /* vertical: add a class column at/above this w  */
+/* ── Telemetry strip ──────────────────────────────────────────────────────────
+ * route_gen centers the framed map on the long axis and reserves the freed high-x
+ * end as a strip [banner_x, banner_x+banner_w). This bakes the strip's STATIC lines:
+ * every field's label, plus the DST/ORG/SYS values. The DYNAMIC ETA/STATUS values
+ * count down / change live, so route_anim redraws those per frame (route_anim.c) —
+ * the bg re-blit clears the prior value each frame. Every line is one rotated font
+ * column (GFX_TT_ROWS wide on the long axis); each field stacks two lines, label
+ * above value, GFX_TEL_PITCH apart. */
 
-/* Rendered width / height (px) of a Tom Thumb string at scale (trailing advance
- * gap dropped). Horizontal text is gfx_text_w wide × 5·scale tall; a vertical
- * column is 5·scale wide × gfx_text_h tall. */
-static int16_t gfx_text_w(const char *s, uint8_t scale) {
+/* Rendered length (px) of a Tom Thumb string at scale, trailing advance gap
+ * dropped — the run of cells down a vertical column. */
+static int16_t gfx_text_h(const char *s, uint8_t scale) {
     int n = 0; while (s[n]) n++;
     return n ? (int16_t)((n * GFX_TT_ADV - 1) * scale) : 0;
 }
-static int16_t gfx_text_h(const char *s, uint8_t scale) {
-    return gfx_text_w(s, scale);   /* same cell count down the rotated axis */
+
+/* Long-axis left-x of line index `line` (0 = top = high-x), strip = [bx, bx+bw). */
+static int16_t gfx_tel_line_x(uint8_t bx, uint8_t bw, int line) {
+    return (int16_t)(bx + bw - GFX_TT_ROWS - line * GFX_TEL_PITCH);
 }
 
-/* Wrap s in [ ] brackets if the bracketed form fits avail px (scale 1); else copy
- * s verbatim. dst must hold at least strlen(s)+3. */
-static void gfx_bracket_fit(char *dst, const char *s, int16_t avail) {
-    int n = 0; while (s[n]) n++;
-    int16_t braced = (int16_t)((n + 2) * GFX_TT_ADV - 1);
-    int i = 0;
-    if (braced <= avail) {
-        dst[0] = '[';
-        for (; s[i]; i++) dst[1 + i] = s[i];
-        dst[1 + i] = ']'; dst[2 + i] = '\0';
-    } else {
-        for (; s[i]; i++) dst[i] = s[i];
-        dst[i] = '\0';
+int gfx_tel_nfields(uint8_t bw) {
+    if (!bw) return 0;
+    int lines = ((int)bw + GFX_TEL_GAP) / GFX_TEL_PITCH;
+    int f = lines / 2;
+    if (f > GFX_TEL_NFIELDS) f = GFX_TEL_NFIELDS;
+    return f;
+}
+
+/* Short-axis (physical-left) inset for left-aligned strip text. */
+#define GFX_TEL_TEXT_Y0  1
+
+/* Left-aligned bottom anchor: the text run occupies short-axis [Y0, Y0+text_h], so every
+ * line starts at the same physical-left edge instead of being centered on the 32-px axis. */
+static int16_t gfx_tel_text_y(const char *s) {
+    return (int16_t)(gfx_text_h(s, 1) + GFX_TEL_TEXT_Y0);
+}
+
+void gfx_tel_draw_line(uint8_t bx, uint8_t bw, int line, const char *s) {
+    gfx_prim_text_vertical(gfx_tel_line_x(bx, bw, line), gfx_tel_text_y(s), s, 1);
+}
+
+/* Inverse label: fill the line's chip — the glyph box grown by GFX_TEL_CHIP_PAD on every
+ * side — green, then punch the label out in black, so the field names read as framed tags
+ * above their values. */
+static void gfx_tel_draw_label(uint8_t bx, uint8_t bw, int line, const char *s) {
+    int16_t lx = gfx_tel_line_x(bx, bw, line);
+    int16_t h  = gfx_text_h(s, 1);
+    int16_t x0 = (int16_t)(lx - GFX_TEL_CHIP_PAD);
+    int16_t x1 = (int16_t)(lx + GFX_TT_ROWS - 1 + GFX_TEL_CHIP_PAD);
+    int16_t y0 = (int16_t)(GFX_TEL_TEXT_Y0 - GFX_TEL_CHIP_PAD);
+    int16_t y1 = (int16_t)(GFX_TEL_TEXT_Y0 + h + GFX_TEL_CHIP_PAD);
+    for (int16_t x = x0; x <= x1; x++)
+        for (int16_t y = y0; y <= y1; y++)
+            gfx_prim_pixel(x, y, true);
+    gfx_prim_vtext(lx, gfx_tel_text_y(s), s, 1, false);
+}
+
+/* Field ids: 0 DST  1 ORG  2 ETA  3 STATUS  4 SYS. A strip slot i (0 = top = high-x)
+ * holds two lines — label at line 2i, value at line 2i+1. Which fields appear, and in
+ * what top→bottom order, depends on the field count: a fixed lookup keeping DST the
+ * centered anchor (context grows above it, live flight data below it toward the map). */
+static const char *const GFX_TEL_LABEL[5] = { "DST", "ORG", "ETA", "STATUS", "SYS" };
+
+/* GFX_TEL_ORDER[n][slot] = field id at top→bottom slot, for an n-field strip (-1 empty). */
+static const int8_t GFX_TEL_ORDER[6][5] = {
+    { -1, -1, -1, -1, -1 },   /* 0: (no strip)                 */
+    {  0, -1, -1, -1, -1 },   /* 1: DST                        */
+    {  1,  0, -1, -1, -1 },   /* 2: ORG  DST                   */
+    {  1,  0,  2, -1, -1 },   /* 3: ORG  DST  ETA              */
+    {  4,  1,  0,  2, -1 },   /* 4: SYS  ORG  DST  ETA         */
+    {  4,  1,  0,  2,  3 },   /* 5: SYS  ORG  DST  ETA  STATUS */
+};
+
+int gfx_tel_field_slot(int n, int id) {
+    if (n < 0 || n > GFX_TEL_NFIELDS) return -1;
+    for (int i = 0; i < n; i++) if (GFX_TEL_ORDER[n][i] == id) return i;
+    return -1;
+}
+
+/* Baked value for a field, or NULL when the value is drawn per-frame (ETA/STATUS). */
+static const char *gfx_tel_static_value(const gfx_route_t *r, int id) {
+    return id == 0 ? r->designation : id == 1 ? r->origin : id == 4 ? r->system_name : NULL;
+}
+
+static void gfx_route_draw_telemetry(const gfx_route_t *r) {
+    int n = gfx_tel_nfields(r->banner_w);
+    const int8_t *order = GFX_TEL_ORDER[n];
+    for (int i = 0; i < n; i++) {
+        int id = order[i];
+        gfx_tel_draw_label(r->banner_x, r->banner_w, 2 * i, GFX_TEL_LABEL[id]);  /* inverse chip */
+        const char *v = gfx_tel_static_value(r, id);
+        if (v) gfx_tel_draw_line(r->banner_x, r->banner_w, 2 * i + 1, v);  /* dynamic ids drawn per-frame */
     }
 }
 
-static void gfx_route_draw_banner(const gfx_route_t *route) {
-    int16_t bx = (int16_t)route->banner_x;
-    int16_t bw = (int16_t)route->banner_w;
-    if (bw <= 0) return;
-    const char *desig = route->designation;
-    const char *cls   = route->dest_class;
-
-    if (bw <= GFX_BANNER_VERT_MAX) {
-        /* Slim vertical label reading bottom→top down the tall axis. */
-        bool two_col = (bw >= GFX_BANNER_VERT_2COL) && cls[0];
-        int16_t col_w = (int16_t)(GFX_TT_ROWS);      /* 5 px at scale 1 */
-        int16_t gap   = 2;
-        int16_t total = two_col ? (int16_t)(col_w + gap + col_w) : col_w;
-        int16_t x0 = (int16_t)(bx + (bw - total) / 2);
-        int16_t dh = gfx_text_h(desig, 1);
-        gfx_prim_text_vertical(x0, (int16_t)((32 + dh) / 2), desig, 1);
-        if (two_col) {
-            int16_t ch = gfx_text_h(cls, 1);
-            gfx_prim_text_vertical((int16_t)(x0 + col_w + gap),
-                                   (int16_t)((32 + ch) / 2), cls, 1);
-        }
-    } else if (bw <= GFX_BANNER_HORIZ_MAX) {
-        /* Horizontal 2-line readout, bracketed for a CRT feel: designation / class. */
-        char l1[12], l2[8];
-        gfx_bracket_fit(l1, desig, bw);
-        gfx_bracket_fit(l2, cls,   bw);
-        int16_t line_h = GFX_TT_ROWS, vgap = 3;
-        int16_t top = (int16_t)((32 - (2 * line_h + vgap)) / 2);
-        gfx_prim_text((int16_t)(bx + (bw - gfx_text_w(l1, 1)) / 2), top, l1, 1);
-        gfx_prim_text((int16_t)(bx + (bw - gfx_text_w(l2, 1)) / 2),
-                      (int16_t)(top + line_h + vgap), l2, 1);
-    } else {
-        /* Big framed placard: designation 2× over a 1× spectral-class subline. */
-        for (int16_t x = bx; x < bx + bw; x++) {        /* thin frame */
-            gfx_prim_pixel(x, 0, true);
-            gfx_prim_pixel(x, 31, true);
-        }
-        for (int16_t y = 0; y < 32; y++) {
-            gfx_prim_pixel(bx, y, true);
-            gfx_prim_pixel((int16_t)(bx + bw - 1), y, true);
-        }
-        uint8_t dscale = (gfx_text_w(desig, 2) <= bw - 4) ? 2 : 1;
-        int16_t dw = gfx_text_w(desig, dscale);
-        gfx_prim_text((int16_t)(bx + (bw - dw) / 2), 6, desig, dscale);
-        if (cls[0]) {
-            int16_t cw = gfx_text_w(cls, 1);
-            gfx_prim_text((int16_t)(bx + (bw - cw) / 2), 22, cls, 1);
-        }
-    }
+/* STATUS phase word for gfx_phase_t — shared by the master strip overlay and the
+ * slave telemetry panel (keymap.c's phase_word delegates here). */
+const char *gfx_phase_word(uint8_t phase) {
+    static const char *const words[] = {
+        [GFX_PHASE_DEPART]  = "DEPART",
+        [GFX_PHASE_TRANSIT] = "TRANSIT",
+        [GFX_PHASE_FLYBY]   = "FLYBY",
+        [GFX_PHASE_COAST]   = "COAST",
+        [GFX_PHASE_ARRIVE]  = "ARRIVE",
+    };
+    return (phase <= GFX_PHASE_ARRIVE) ? words[phase] : "TRANSIT";
 }
 
 /* ── Route rendering ────────────────────────────────────────────────────────── */
@@ -381,7 +418,7 @@ void gfx_route_draw_bg(const gfx_route_t *route) {
         gfx_prim_body(route->bodies[i].x, route->bodies[i].y);
     }
 
-    if (route->banner_w) gfx_route_draw_banner(route);
+    if (route->banner_w) gfx_route_draw_telemetry(route);
 }
 
 void gfx_route_bake_bg(const gfx_route_t *route, uint8_t buf[512]) {

@@ -28,7 +28,7 @@ repo_root() {
 layer_names_for() {
   case "$1/$2" in
     crkbd/rev1/aeby)
-      printf '%s\n' Base "Numbers & Symbols" Navigation "Function & Media" Gaming "Gaming Arrows"
+      printf '%s\n' Base "Numbers & Symbols" Navigation "Function & Media" Gaming "Gaming Arrows" "Mission Control" "Token Entry"
       ;;
     ploopyco/madromys/aeby)
       printf '%s\n' Base Fn Gaming

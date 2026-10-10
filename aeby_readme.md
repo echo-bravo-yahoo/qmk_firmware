@@ -1,5 +1,9 @@
 All boards compile via the `qmkfm/qmk_cli` Docker image — no local QMK toolchain needed.
 
+Hardware details for each board (PCB and case colors, microcontrollers, switches) are in the notes at
+`~/notes/20-29 digital/22 esoteric-input-devices/22.00 meta/current-state.md`. The headings below name
+boards by PCB color.
+
 ## [Ploopy adept](./keyboards/ploopyco/madromys)
 
 - Bootload: Plug in while holding the bottom left button down
@@ -32,9 +36,6 @@ Then bootload the board and copy the UF2 to the RPI drive.
 
 ## [Corne (white PCB, busted)](./keyboards/crkbd)
 
-> Colors name the **PCB**, not the case. This is the white-PCB board (Elite-C / AVR).
-
-- Microcontroller: Elite-C x 2 (ATmega32U4)
 - Bootload: Plug in while holding reset
 
 ### Build workflow
@@ -83,9 +84,6 @@ The script writes the EE_HANDS EEPROM byte (handedness) in addition to the firmw
 
 ## [Corne (blue PCB, new)](./keyboards/crkbd) — daily driver
 
-> Colors name the **PCB**, not the case: this is a **blue PCB in a white case**.
-
-- Microcontroller: Elite-Pi × 2 (RP2040)
 - Keymap: `aeby` (homerow mods A/S/D/F = GUI/Alt/Ctrl/Shift, mirrored; 6 layers)
 - Left OLED: procedurally generated star-system transit map (Alien aesthetic) — the USCSS Patna
   crawls a route to a survey-designated destination (e.g. `LV-426`) in real time, then a new system
